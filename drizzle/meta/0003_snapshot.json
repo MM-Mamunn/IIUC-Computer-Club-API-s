@@ -1,0 +1,293 @@
+{
+  "id": "1c5314fc-3215-4ea4-862a-f84ec5eabce7",
+  "prevId": "a5cc4939-7462-40dd-86bb-50da1a5b56ec",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.committee": {
+      "name": "committee",
+      "schema": "",
+      "columns": {
+        "number": {
+          "name": "number",
+          "type": "varchar(255)",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "gender": {
+          "name": "gender",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'male'"
+        },
+        "start": {
+          "name": "start",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "end": {
+          "name": "end",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "beginning_budget": {
+          "name": "beginning_budget",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.executives": {
+      "name": "executives",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "role": {
+          "name": "role",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "position": {
+          "name": "position",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "committee": {
+          "name": "committee",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "assigned_by": {
+          "name": "assigned_by",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "executives_id_users_id_fk": {
+          "name": "executives_id_users_id_fk",
+          "tableFrom": "executives",
+          "tableTo": "users",
+          "columnsFrom": [
+            "id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "cascade"
+        },
+        "executives_role_role_role_fk": {
+          "name": "executives_role_role_role_fk",
+          "tableFrom": "executives",
+          "tableTo": "role",
+          "columnsFrom": [
+            "role"
+          ],
+          "columnsTo": [
+            "role"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "cascade"
+        },
+        "executives_position_position_position_fk": {
+          "name": "executives_position_position_position_fk",
+          "tableFrom": "executives",
+          "tableTo": "position",
+          "columnsFrom": [
+            "position"
+          ],
+          "columnsTo": [
+            "position"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "cascade"
+        },
+        "executives_committee_committee_number_fk": {
+          "name": "executives_committee_committee_number_fk",
+          "tableFrom": "executives",
+          "tableTo": "committee",
+          "columnsFrom": [
+            "committee"
+          ],
+          "columnsTo": [
+            "number"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "cascade"
+        },
+        "executives_assigned_by_users_id_fk": {
+          "name": "executives_assigned_by_users_id_fk",
+          "tableFrom": "executives",
+          "tableTo": "users",
+          "columnsFrom": [
+            "assigned_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "cascade"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.position": {
+      "name": "position",
+      "schema": "",
+      "columns": {
+        "position": {
+          "name": "position",
+          "type": "varchar(255)",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.role": {
+      "name": "role",
+      "schema": "",
+      "columns": {
+        "role": {
+          "name": "role",
+          "type": "varchar(255)",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.users": {
+      "name": "users",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(255)",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "gender": {
+          "name": "gender",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'male'"
+        },
+        "email": {
+          "name": "email",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "password": {
+          "name": "password",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "profile_image": {
+          "name": "profile_image",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "users_email_unique": {
+          "name": "users_email_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "email"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

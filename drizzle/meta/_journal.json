@@ -1,0 +1,34 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1771509232605,
+      "tag": "0000_yellow_kinsey_walden",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1771597551976,
+      "tag": "0001_magenta_photon",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1771597809453,
+      "tag": "0002_dapper_pepper_potts",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1771599158571,
+      "tag": "0003_complete_captain_marvel",
+      "breakpoints": true
+    }
+  ]
+}

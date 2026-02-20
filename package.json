@@ -1,0 +1,29 @@
+{
+  "name": "hono",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@types/bcryptjs": "^3.0.0",
+    "@types/bun": "latest",
+    "@types/jsonwebtoken": "^9.0.10",
+    "drizzle-kit": "^0.31.9"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^1.0.2",
+    "bcryptjs": "^3.0.3",
+    "dotenv": "^17.3.1",
+    "drizzle-orm": "^0.45.1",
+    "hono": "^4.11.9",
+    "jsonwebtoken": "^9.0.3",
+    "postgres": "^3.4.8"
+  },
+  "scripts": {
+    "dev": "bun run src/server.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:push": "drizzle-kit push"
+  }
+}
