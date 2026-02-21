@@ -1,0 +1,1 @@
+ALTER TABLE "executives" ADD CONSTRAINT "executives_id_committee_pk" PRIMARY KEY("id","committee");

@@ -1,11 +1,13 @@
 import { Context, Next } from "hono";
 
-export const requireRole = (role: string) => {
-   console.log("role  in");
+export const requireRole = (roles: string[]) => {
   return async (c: Context, next: Next) => {
+    console.log('in require role');
+    
     const user = c.get("user");
-
-    if (!user || user.role !== role) {
+    console.log(user.role);
+    
+    if (!user || !roles.includes(user.role)) {
       return c.json({ message: "Forbidden" }, 403);
     }
 

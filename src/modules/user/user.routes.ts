@@ -6,14 +6,14 @@ const router = new Hono();
 
 router.get("/teacher-dashboard",
   authMiddleware,
-  requireRole("teacher"),
+  requireRole(["teacher"]),
   (c) => c.json({ message: "Welcome Teacher" })
 );
 
 
 router.get("/student-dashboard",
   authMiddleware,
-  requireRole("student"),
+  requireRole(["student"]),
   (c) => c.json({ message: "Welcome Student" })
 );
 

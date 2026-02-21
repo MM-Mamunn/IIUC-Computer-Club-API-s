@@ -1,18 +1,3 @@
-// import { pgTable, serial, text, varchar, timestamp } from "drizzle-orm/pg-core";
-
-// export const users = pgTable("users", {
-//   id: serial("id").primaryKey(),
-//   email: varchar("email", { length: 255 }).unique().notNull(),
-//   password: text("password").notNull(),
-//   role: varchar("role", { length: 20 }).notNull(),
-//   session: varchar("session", { length: 100 }), // ✅ new column
-//   // ✅ Cloudinary profile picture URL
-//   profileImageUrl: text("profile_image_url"),
-  
-//   createdAt: timestamp("created_at").defaultNow()
-// });
-
-
 import {
   pgTable,
   varchar,
@@ -75,13 +60,15 @@ export const users = pgTable("users", {
   gender: varchar("gender", { length: 20 })
   .notNull()
   .default("male"),
-  
+
   email: varchar("email", { length: 255 })
     .notNull()
     .unique(),
 
   password: text("password")
     .notNull(),
+  
+    description: text("description"),
 
   profileImage: text("profile_image"),
 
@@ -89,36 +76,42 @@ export const users = pgTable("users", {
     .defaultNow()
 });
 
-export const executives = pgTable("executives", {
-  id: varchar("id", { length: 255 })
-    .notNull()
-    .references(() => users.id, {
-      onDelete: "cascade",
-      onUpdate: "cascade",
-    }),
+export const executives = pgTable(
+  "executives",
+  {
+    id: varchar("id", { length: 255 })
+      .notNull()
+      .references(() => users.id, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
 
-  role: varchar("role", { length: 255 })
-    .references(() => roles.role, {
-      onDelete: "restrict",
-      onUpdate: "cascade",
-    }),
+    committee: varchar("committee", { length: 255 })
+      .notNull()
+      .references(() => committee.number, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
 
-  position: varchar("position", { length: 255 })
-    .references(() => positions.position, {
-      onDelete: "restrict",
-      onUpdate: "cascade",
-    }),
+    role: varchar("role", { length: 255 })
+      .references(() => roles.role, {
+        onDelete: "restrict",
+        onUpdate: "cascade",
+      }),
 
-  committee: varchar("committee", { length: 255 })
-    .notNull()
-    .references(() => committee.number, {
-      onDelete: "cascade",
-      onUpdate: "cascade",
-    }),
+    position: varchar("position", { length: 255 })
+      .references(() => positions.position, {
+        onDelete: "restrict",
+        onUpdate: "cascade",
+      }),
 
-  assignedBy: varchar("assigned_by", { length: 255 })
-    .references(() => users.id, {
-      onDelete: "set null",
-      onUpdate: "cascade",
-    }),
-});
+    assignedBy: varchar("assigned_by", { length: 255 })
+      .references(() => users.id, {
+        onDelete: "set null",
+        onUpdate: "cascade",
+      }),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.id, table.committee] }),
+  })
+);

@@ -1,5 +1,5 @@
 import { db } from "../../config/db";
-import { users } from "../../db/schema";
+import { executives, positions, users } from "../../db/schema";
 import { eq,sql } from "drizzle-orm";
 import { hashPassword, comparePassword } from "../../utils/hash";
 import { generateToken } from "../../utils/jwt";
@@ -40,10 +40,13 @@ export const loginUser = async (id: string, password: string) => {
     throw new HTTPException(401, { message: "Invalid credentials" });
   }
 
+  let pos = await db.select().from(executives).where(eq(executives.id, id ));
+ 
+
   const token = generateToken({
     id: user[0].id,
-    role: user[0].role,
-    position: user[0].position
+    role: pos[0]?.role || "member",
+    position: pos[0]?.position || "member",
   });
 
   return { token };
