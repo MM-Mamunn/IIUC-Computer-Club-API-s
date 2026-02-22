@@ -4,7 +4,7 @@ import { eq,and, or } from "drizzle-orm";
 import { hashPassword, comparePassword } from "../../utils/hash";
 import { generateToken } from "../../utils/jwt";
 import { HTTPException } from "hono/http-exception";
-import { Context } from "hono";
+import type { Context } from "hono";
 
 
 // FUNCTIONS TO ADD VICE PRESIDENT
