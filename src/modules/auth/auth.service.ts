@@ -23,30 +23,31 @@ export const registerUser = async (id: string,name: string, email: string, passw
 
   return newUser;
 };
-
 export const loginUser = async (id: string, password: string) => {
+  const [user] = await db
+    .select()
+    .from(users)
+    .where(eq(users.id, id));
 
-  // console.log(id.toUpperCase());
-  
-  const user = await db.select().from(users).where(eq(users.id, id ));
-  
-  if (!user.length) {
+  if (!user) {
     throw new HTTPException(401, { message: "Invalid credentials" });
   }
 
-  const valid = await comparePassword(password, user[0].password);
+  const valid = await comparePassword(password, user.password);
 
   if (!valid) {
     throw new HTTPException(401, { message: "Invalid credentials" });
   }
 
-  let pos = await db.select().from(executives).where(eq(executives.id, id ));
- 
+  const [pos] = await db
+    .select()
+    .from(executives)
+    .where(eq(executives.id, id));
 
   const token = generateToken({
-    id: user[0].id,
-    role: pos[0]?.role || "member",
-    position: pos[0]?.position || "member",
+    id: user.id,
+    role: pos?.role ?? "member",
+    position: pos?.position ?? "member",
   });
 
   return { token };
