@@ -1,9 +1,9 @@
-import { Context, Next } from "hono";
+import type { Context, Next } from "hono";
 import { verifyToken } from "../utils/jwt";
 
 export const authMiddleware = async (c: Context, next: Next) => {
   console.log("auth in");
-  
+
   const authHeader = c.req.header("Authorization");
 
   if (!authHeader) return c.json({ message: "Unauthorized" }, 401);
