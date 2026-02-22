@@ -24,6 +24,7 @@
   "scripts": {
     "dev": "bun run src/server.ts",
     "db:generate": "drizzle-kit generate",
-    "db:push": "drizzle-kit push"
+    "db:push": "drizzle-kit push",
+    "build": "echo 'No build needed'"
   }
 }
