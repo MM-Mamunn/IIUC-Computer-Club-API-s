@@ -17,11 +17,6 @@ router.get(
   (c) => c.json({ message: "Welcome boss" }),
 );
 
-router.get(
-  "/student-dashboard",
-  authMiddleware,
-  requireRole(["student"]),
-  (c) => c.json({ message: "Welcome Student" }),
-);
+router.get("/test", (c) => c.json({ message: "Working test" }));
 
 export default router;
