@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { addVp, addTrsr, addAGS, addGS } from "./authorization.controller";
+import { addVp, addTrsr, addAGS, addGS,addSec } from "./authorization.controller";
 import { requireRole } from "../../middlewares/role.middleware";
 import { authMiddleware } from "../../middlewares/auth.middleware";
 const router = new Hono();
@@ -26,5 +26,12 @@ router.post(
   authMiddleware,
   requireRole(["president", "treasurer", "vice president"]),
   addAGS,
+);
+
+router.post(
+  "/addsecretaries",
+  authMiddleware,
+  requireRole(["president", "treasurer", "vice president", "general secretary",  "assistant general secretary"]),
+  addSec,
 );
 export default router;

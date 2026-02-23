@@ -4,6 +4,7 @@ import {
   addVicePresident,
   addAsstGeneralSecretary,
   addGeneralSecretary,
+  addSecretaries
 } from "./add.authorization.service";
 
 export const addVp = async (c: Context) => {
@@ -31,5 +32,10 @@ export const addAGS = async (c: Context) => {
   const { id, role, committee } = await c.req.json();
 
   const addvp = await addAsstGeneralSecretary(id, role, committee, c);
+  return c.json({ addvp }, 201);
+};
+export const addSec = async (c: Context) => {
+  const { id, role, position, committee } = await c.req.json();
+  const addvp = await addSecretaries(id, position, role, committee, c);
   return c.json({ addvp }, 201);
 };

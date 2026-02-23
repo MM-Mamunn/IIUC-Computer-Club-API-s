@@ -173,3 +173,52 @@ export const addAsstGeneralSecretary = async (id: string,role: string,committee:
 
   return newAGS;
 };
+
+
+export const addSecretaries = async (id: string,position : string, role: string,committee: string,c: Context) => {
+  
+     const user = c.get("user");
+   
+  if(role !== "secretary" && role !== "assistant secretary" ){
+    throw new HTTPException(400, { message: `Invalid role ${role}. Must be secretary, assistant secretary` });
+  }
+  
+  if(position == "president" || position == "general secretary" || position == "assistant general secretary" || position == "vice president" ){
+    throw new HTTPException(400, { message: `Invalid position ${position}. Secretaries and assistant secretaries can't be in this position` });
+  }
+  
+ const existing = await db
+  .select()
+  .from(executives)
+  .where(
+    and(
+      eq(executives.committee, committee),
+      eq(executives.role, role),
+      eq(executives.position, position)
+    )
+  );
+  if (existing.length > 0) {
+    throw new HTTPException(409, { message: `Role ${role} in position ${position} already exists in committee ${committee}` });
+  }
+
+
+ const [newSec] = await db
+  .insert(executives)
+  .values({
+    id,
+    committee,
+    role,
+    position,
+    assignedBy: user.id,
+  })
+  .onConflictDoUpdate({
+    target: [executives.id, executives.committee],
+    set: {
+      role,
+      position,
+      assignedBy: user.id,
+    },
+  })
+  .returning();
+  return newSec;
+};
