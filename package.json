@@ -5,14 +5,15 @@
   "private": true,
   "devDependencies": {
     "@types/bcryptjs": "^3.0.0",
-    "@types/bun": "latest",
     "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^25.3.0",
     "drizzle-kit": "^0.31.9"
   },
   "peerDependencies": {
     "typescript": "^5"
   },
   "dependencies": {
+    "@hono/node-server": "^1.19.9",
     "@neondatabase/serverless": "^1.0.2",
     "bcryptjs": "^3.0.3",
     "dotenv": "^17.3.1",
@@ -25,6 +26,7 @@
     "dev": "bun run src/server.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
-    "build": "echo 'No build needed'"
+    "build": "tsc",
+    "start": ""
   }
 }
