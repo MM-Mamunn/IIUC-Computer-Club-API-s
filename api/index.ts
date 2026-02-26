@@ -1,7 +1,16 @@
+
+import { handle } from 'hono/vercel'
 import app from "../src/app";
+// const app = new Hono().basePath('/api')
 
-export const config = {
-  runtime: "nodejs"
-};
+app.get('/', (c) => {
+  return c.json({ message: "Congrats! You've deployed Hono to Vercel" })
+})
 
-export default app.fetch;
+const handler = handle(app);
+
+export const GET = handler;
+export const POST = handler;
+export const PATCH = handler;
+export const PUT = handler;
+export const OPTIONS = handler;

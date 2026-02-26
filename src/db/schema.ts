@@ -5,7 +5,8 @@ import {
   timestamp,
   date,
   primaryKey,
-  doublePrecision
+  doublePrecision,
+  integer 
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -26,7 +27,10 @@ export const positions = pgTable("position", {
 export const roles = pgTable("role", {
   role: varchar("role", { length: 255 })
     .primaryKey(),
-
+  // ✅ New column
+  priority: integer("priority")
+    .notNull()
+    .default(1),
   description: text("description"),
 });
 

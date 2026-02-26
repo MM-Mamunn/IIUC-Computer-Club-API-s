@@ -43,6 +43,13 @@
       "when": 1771689649166,
       "tag": "0005_cool_james_howlett",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1772115794331,
+      "tag": "0006_wide_lily_hollister",
+      "breakpoints": true
     }
   ]
 }
