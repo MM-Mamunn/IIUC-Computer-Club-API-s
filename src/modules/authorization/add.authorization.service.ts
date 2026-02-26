@@ -1,8 +1,6 @@
 import { db } from "../../config/db";
 import { executives, users } from "../../db/schema";
 import { eq,and, or } from "drizzle-orm";
-import { hashPassword, comparePassword } from "../../utils/hash";
-import { generateToken } from "../../utils/jwt";
 import { HTTPException } from "hono/http-exception";
 import type { Context } from "hono";
 
