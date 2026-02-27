@@ -3,6 +3,8 @@ import { executives, users } from "../../db/schema";
 import { eq,and, or } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
 import type { Context } from "hono";
+import { getRolesByPriorityRange } from "../global/global.service";
+import { log } from "node:console";
 
 
 // FUNCTIONS TO ADD VICE PRESIDENT
@@ -10,10 +12,10 @@ export const addVicePresident = async (id: string,role: string,committee: string
   
      const user = c.get("user");
 
-   console.log("role is",role);
+  //  console.log("role is",role);
    
-  if(role !== "vice president 1" && role !== "vice president 2" &&  role !== "vice president 3"){
-    throw new HTTPException(400, { message: `Invalid role ${role}. Must be vice president 1, 2, or 3` });
+  if(role !== "vice president 1" && role !== "vice president 2" &&  role !== "vice president 3" && role !== "vice president 4"){
+    throw new HTTPException(400, { message: `Invalid role ${role}. Must be vice president 1, 2, 3, or 4` });
   }
 
  const existing = await db
@@ -133,10 +135,15 @@ const existing = await db
 export const addAsstGeneralSecretary = async (id: string,role: string,committee: string,c: Context) => {
   
      const user = c.get("user");
-
-  if(role !== "assistant general secretary 1" && role !== "assistant general secretary 2" &&  role !== "assistant general secretary 3"){
-    throw new HTTPException(400, { message: `Invalid role ${role}. Must be assistant general secretary 1, 2, or 3` });
-  }
+    //  4 = assistant general secretary 1,2,....
+     const roles = await getRolesByPriorityRange(4,5);
+     console.log(roles);
+     
+     if (!roles.includes(role)) {
+      throw new HTTPException(409, { message: `role not in allowed range` });
+      }
+  
+        console.log("testing asstgs now");
 
  const existing = await db
   .select()
@@ -168,7 +175,7 @@ export const addAsstGeneralSecretary = async (id: string,role: string,committee:
     },
   })
   .returning();
-
+ log("new AGS is", newAGS);
   return newAGS;
 };
 
@@ -177,9 +184,16 @@ export const addSecretaries = async (id: string,position : string, role: string,
   
      const user = c.get("user");
    
-  if(role !== "secretary" && role !== "assistant secretary" ){
-    throw new HTTPException(400, { message: `Invalid role ${role}. Must be secretary, assistant secretary` });
-  }
+    //  5 = secretary, 6 = assistant secretary
+    const roles = await getRolesByPriorityRange(5,7);
+     console.log(roles);
+     
+     if (!roles.includes(role)) {
+      throw new HTTPException(409, { message: `role not in allowed range` });
+      }
+  // if(role !== "secretary" && role !== "assistant secretary" ){
+  //   throw new HTTPException(400, { message: `Invalid role ${role}. Must be secretary, assistant secretary` });
+  // }
   
   if(position == "president" || position == "general secretary" || position == "assistant general secretary" || position == "vice president" ){
     throw new HTTPException(400, { message: `Invalid position ${position}. Secretaries and assistant secretaries can't be in this position` });

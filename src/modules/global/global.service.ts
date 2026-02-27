@@ -5,9 +5,8 @@ import { HTTPException } from "hono/http-exception";
 
 export const getRolesByPriorityRange = async (
   from: number,
-  to: number
+  to: number,
 ): Promise<string[]> => {
-  // ✅ Validate range
   if (from > to) {
     throw new HTTPException(400, {
       message: "'from' must be less than or equal to 'to'",
@@ -17,12 +16,7 @@ export const getRolesByPriorityRange = async (
   const result = await db
     .select({ role: roles.role })
     .from(roles)
-    .where(
-      and(
-        gte(roles.priority, from),
-        lte(roles.priority, to)
-      )
-    )
+    .where(and(gte(roles.priority, from), lte(roles.priority, to)))
     .orderBy(asc(roles.priority)); // optional but recommended
 
   // Return only role names as string[]

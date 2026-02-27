@@ -14,7 +14,7 @@ console.log("in auth controller register function");
   // }
 
   const user = await registerUser(id, name, email, password);
-  return c.json({ user }, 201);
+  return c.json({ token: user.token.token }, 201);
 };
 
 export const login = async (c: Context) => {

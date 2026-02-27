@@ -12,7 +12,7 @@ export const registerUser = async (id: string,name: string, email: string, passw
   const existing = await db.select().from(users).where(eq(sql`upper(${users.id})`, id.toUpperCase()));
 
   if (existing.length > 0) {
-    throw new HTTPException(409, { message: "ID already exists" });
+    throw new HTTPException(409, { message: `user ${id} already exists` });
   }
 
   const hashed = await hashPassword(password);
@@ -22,7 +22,12 @@ export const registerUser = async (id: string,name: string, email: string, passw
     .values({id: id, name: name, email : email, password: hashed  })
     .returning();
 
-  return newUser;
+     if (!newUser) {
+    throw new HTTPException(401, { message: "Failed to create user" });
+  }
+  const token = await loginUser(id, password);
+  // return newUser;
+  return { token };
 };
 export const loginUser = async (id: string, password: string) => {
   const [user] = await db
