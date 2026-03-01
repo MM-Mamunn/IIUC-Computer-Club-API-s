@@ -1,5 +1,5 @@
 import type { Context } from "hono";
-import { addCommittee } from "./committee.service";
+import { addCommittee, showActive } from "./committee.service";
 
 // committee.controller.ts
 type CommitteeBody = {
@@ -21,8 +21,13 @@ export const newCommittee = async (c: Context) => {
     body.end ?? null,
     body.beginningBudget ?? null,
     body.description ?? null,
-    c
+    c,
   );
 
   return c.json({ committee }, 201);
+};
+export const activeCommittees = async (c: Context) => {
+  const active = await showActive(c);
+
+  return c.json({ active }, 201);
 };

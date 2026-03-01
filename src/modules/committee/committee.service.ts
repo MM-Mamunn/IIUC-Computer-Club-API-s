@@ -90,3 +90,18 @@ export const addCommittee = async (
 
   return newCommittee;
 };
+
+
+export const showActive = async (
+  c: Context
+) => {
+  const user = c.get("user");
+
+
+ const activeCommittees = await db
+  .select()
+  .from(committee)
+  .where(isNull(committee.end));
+
+  return activeCommittees;
+};
