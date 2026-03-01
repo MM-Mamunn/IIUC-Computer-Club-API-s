@@ -9,9 +9,7 @@ console.log("in auth controller register function");
   const { id,name, email, password } = await c.req.json();
  console.log(id,name,email,password);
  
-  // if (!["teacher", "student"].includes(role)) {
-  //   return c.json({ message: "Invalid role" }, 400);
-  // }
+
 
   const user = await registerUser(id, name, email, password);
   return c.json({ token: user.token.token }, 201);

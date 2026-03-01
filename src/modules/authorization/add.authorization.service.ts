@@ -30,9 +30,7 @@ export const addVicePresident = async (id: string,role: string,committee: string
   if (existing.length > 0) {
     throw new HTTPException(409, { message: `Role ${role} already exists in committee ${committee}` });
   }
-  // const [newVP] = await db.insert(executives)
-  //   .values({id,position: 'vice president',role, committee, assignedBy: user.id })
-  //   .returning();
+
   const [newVP] = 
   await db
   .insert(executives)
@@ -136,7 +134,7 @@ export const addAsstGeneralSecretary = async (id: string,role: string,committee:
   
      const user = c.get("user");
     //  4 = assistant general secretary 1,2,....
-     const roles = await getRolesByPriorityRange(4,5);
+     const roles = await getRolesByPriorityRange(4,4);
      console.log(roles);
      
      if (!roles.includes(role)) {
@@ -185,15 +183,13 @@ export const addSecretaries = async (id: string,position : string, role: string,
      const user = c.get("user");
    
     //  5 = secretary, 6 = assistant secretary
-    const roles = await getRolesByPriorityRange(5,7);
+    const roles = await getRolesByPriorityRange(5,6);
      console.log(roles);
      
      if (!roles.includes(role)) {
       throw new HTTPException(409, { message: `role not in allowed range` });
       }
-  // if(role !== "secretary" && role !== "assistant secretary" ){
-  //   throw new HTTPException(400, { message: `Invalid role ${role}. Must be secretary, assistant secretary` });
-  // }
+
   
   if(position == "president" || position == "general secretary" || position == "assistant general secretary" || position == "vice president" ){
     throw new HTTPException(400, { message: `Invalid position ${position}. Secretaries and assistant secretaries can't be in this position` });

@@ -52,8 +52,8 @@ export const loginUser = async (id: string, password: string) => {
 
   const token = generateToken({
     id: user.id,
-    role: pos?.role ?? "member",
-    position: pos?.position ?? "member",
+    role: pos?.role ?? "",
+    position: pos?.position ?? "",
   });
 
   return { token };

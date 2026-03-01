@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import authRoutes from "./modules/auth/auth.routes";
 import authorizationRoutes from "./modules/authorization/authorization.routes";
 import userRoutes from "./modules/user/user.routes";
+import committeeRoutes from "./modules/committee/committee.routes";
 
 const app = new Hono();
 
@@ -22,5 +23,6 @@ app.get("/", (c) => {
 app.route("/api/auth", authRoutes);
 app.route("/api/users", userRoutes);
 app.route("/api/authorization", authorizationRoutes);
+app.route("/api/committee", committeeRoutes);
 
 export default app;
