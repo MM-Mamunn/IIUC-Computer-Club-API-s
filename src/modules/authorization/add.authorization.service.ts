@@ -8,7 +8,7 @@ import { log } from "node:console";
 
 
 // FUNCTIONS TO ADD VICE PRESIDENT
-export const addVicePresident = async (id: string,role: string,committee: string,c: Context) => {
+export const addVicePresident = async (id: string,role: string,number: string,c: Context) => {
   
      const user = c.get("user");
 
@@ -23,12 +23,12 @@ export const addVicePresident = async (id: string,role: string,committee: string
   .from(executives)
   .where(
     and(
-      eq(executives.committee, committee),
+      eq(executives.number, number),
       eq(executives.role, role)
     )
   );
   if (existing.length > 0) {
-    throw new HTTPException(409, { message: `Role ${role} already exists in committee ${committee}` });
+    throw new HTTPException(409, { message: `Role ${role} already exists in number ${number}` });
   }
 
   const [newVP] = 
@@ -36,13 +36,13 @@ export const addVicePresident = async (id: string,role: string,committee: string
   .insert(executives)
   .values({
     id,
-    committee,
+    number,
     role,
     position: "vice president",
     assignedBy: user.id,
   })
   .onConflictDoUpdate({
-    target: [executives.id, executives.committee],
+    target: [executives.id, executives.number],
     set: {
       role,
       position: "vice president",
@@ -54,19 +54,19 @@ export const addVicePresident = async (id: string,role: string,committee: string
 };
 
 // FUNCTION TO ADD TREASURER
-export const addTreasurer = async (id: string,committee: string,c: Context) => {
+export const addTreasurer = async (id: string,number: string,c: Context) => {
 const user = c.get("user");   
 const existing = await db
   .select()
   .from(executives)
   .where(
     and(
-      eq(executives.committee, committee),
+      eq(executives.number, number),
       eq(executives.role, "treasurer")
     )
   );
   if (existing.length > 0) {
-    throw new HTTPException(409, { message: `Treasurer already exists in committee ${committee}` });
+    throw new HTTPException(409, { message: `Treasurer already exists in number ${number}` });
   }
   
   const [newTrsr] =
@@ -76,11 +76,11 @@ const existing = await db
     id,
     role: "treasurer",
     position: "treasurer",
-    committee,
+    number,
     assignedBy: user.id,
   })
   .onConflictDoUpdate({
-    target: [executives.id, executives.committee],
+    target: [executives.id, executives.number],
     set: {
       role : "treasurer",
       position: "treasurer",
@@ -92,19 +92,19 @@ const existing = await db
 };
 
 // FUNCTION TO ADD GENERAL SECRETARY
-export const addGeneralSecretary = async (id: string,committee: string,c: Context) => {
+export const addGeneralSecretary = async (id: string,number: string,c: Context) => {
 const user = c.get("user");   
 const existing = await db
   .select()
   .from(executives)
   .where(
     and(
-      eq(executives.committee, committee),
+      eq(executives.number, number),
       eq(executives.role, "general secretary")
     )
   );
   if (existing.length > 0) {
-    throw new HTTPException(409, { message: `General Secretary already exists in committee ${committee}` });
+    throw new HTTPException(409, { message: `General Secretary already exists in number ${number}` });
   }
   
   const [newGS] =
@@ -114,11 +114,11 @@ const existing = await db
     id,
     role: "general secretary",
     position: "general secretary",
-    committee,
+    number,
     assignedBy: user.id,
   })
   .onConflictDoUpdate({
-    target: [executives.id, executives.committee],
+    target: [executives.id, executives.number],
     set: {
       role : "general secretary",
       position: "general secretary",
@@ -130,7 +130,7 @@ const existing = await db
 };
 
 // FUNCTION TO ADD ASSISTANT GENERAL SECRETARY
-export const addAsstGeneralSecretary = async (id: string,role: string,committee: string,c: Context) => {
+export const addAsstGeneralSecretary = async (id: string,role: string,number: string,c: Context) => {
   
      const user = c.get("user");
     //  4 = assistant general secretary 1,2,....
@@ -148,24 +148,24 @@ export const addAsstGeneralSecretary = async (id: string,role: string,committee:
   .from(executives)
   .where(
     and(
-      eq(executives.committee, committee),
+      eq(executives.number, number),
       eq(executives.role, role)
     )
   );
   if (existing.length > 0) {
-    throw new HTTPException(409, { message: `Role ${role} already exists in committee ${committee}` });
+    throw new HTTPException(409, { message: `Role ${role} already exists in number ${number}` });
   }
  const [newAGS] = await db
   .insert(executives)
   .values({
     id,
-    committee,
+    number,
     role,
     position: "assistant general secretary",
     assignedBy: user.id,
   })
   .onConflictDoUpdate({
-    target: [executives.id, executives.committee],
+    target: [executives.id, executives.number],
     set: {
       role,
       position: "assistant general secretary",
@@ -178,7 +178,7 @@ export const addAsstGeneralSecretary = async (id: string,role: string,committee:
 };
 
 
-export const addSecretaries = async (id: string,position : string, role: string,committee: string,c: Context) => {
+export const addSecretaries = async (id: string,position : string, role: string,number: string,c: Context) => {
   
      const user = c.get("user");
    
@@ -200,13 +200,13 @@ export const addSecretaries = async (id: string,position : string, role: string,
   .from(executives)
   .where(
     and(
-      eq(executives.committee, committee),
+      eq(executives.number, number),
       eq(executives.role, role),
       eq(executives.position, position)
     )
   );
   if (existing.length > 0) {
-    throw new HTTPException(409, { message: `Role ${role} in position ${position} already exists in committee ${committee}` });
+    throw new HTTPException(409, { message: `Role ${role} in position ${position} already exists in number ${number}` });
   }
 
 
@@ -214,13 +214,13 @@ export const addSecretaries = async (id: string,position : string, role: string,
   .insert(executives)
   .values({
     id,
-    committee,
+    number,
     role,
     position,
     assignedBy: user.id,
   })
   .onConflictDoUpdate({
-    target: [executives.id, executives.committee],
+    target: [executives.id, executives.number],
     set: {
       role,
       position,

@@ -90,7 +90,7 @@ export const executives = pgTable(
         onUpdate: "cascade",
       }),
 
-    committee: varchar("committee", { length: 255 })
+    number: varchar("number", { length: 255 })
       .notNull()
       .references(() => committee.number, {
         onDelete: "cascade",
@@ -116,6 +116,6 @@ export const executives = pgTable(
       }),
   },
   (table) => ({
-    pk: primaryKey({ columns: [table.id, table.committee] }),
+    pk: primaryKey({ columns: [table.id, table.number] }),
   })
 );
