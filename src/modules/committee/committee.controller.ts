@@ -1,5 +1,7 @@
 import type { Context } from "hono";
-import { addCommittee, showActive } from "./committee.service";
+import { addCommittee, showActive, showPositions } from "./committee.service";
+// import { committee } from "../../db/schema";
+// import { positions } from "../../db/schema";
 
 // committee.controller.ts
 type CommitteeBody = {
@@ -30,4 +32,11 @@ export const activeCommittees = async (c: Context) => {
   const active = await showActive(c);
 
   return c.json({ active }, 201);
+};
+
+
+export const positions = async (c: Context) => {
+  const {  number } = await c.req.json();
+  const pos = await showPositions( number, c);
+  return c.json({ pos }, 201);
 };

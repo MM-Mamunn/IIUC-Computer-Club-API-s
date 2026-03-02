@@ -1,18 +1,19 @@
 // committee.service.ts
 import type { Context } from "hono";
 import { db } from "../../config/db";
-import { committee } from "../../db/schema";
+import { committee, executives, positions, users } from "../../db/schema";
 import { HTTPException } from "hono/http-exception";
 import { and, eq, isNull } from "drizzle-orm";
+// import { positions } from "./committee.controller";
 
 export const addCommittee = async (
   number: string,
   start: string,
   gender: string,
-  end: string | null,                 // accept null from controller
-  beginningBudget: number | null,     // accept number | null
-  description: string | null,         // accept string | null
-  c: Context
+  end: string | null, // accept null from controller
+  beginningBudget: number | null, // accept number | null
+  description: string | null, // accept string | null
+  c: Context,
 ) => {
   const user = c.get("user");
 
@@ -42,7 +43,10 @@ export const addCommittee = async (
 
   // validate beginningBudget if provided (must be finite number)
   if (beginningBudget !== null && beginningBudget !== undefined) {
-    if (typeof beginningBudget !== "number" || !Number.isFinite(beginningBudget)) {
+    if (
+      typeof beginningBudget !== "number" ||
+      !Number.isFinite(beginningBudget)
+    ) {
       throw new HTTPException(400, {
         message: "beginningBudget must be a valid number",
       });
@@ -91,17 +95,22 @@ export const addCommittee = async (
   return newCommittee;
 };
 
-
-export const showActive = async (
-  c: Context
-) => {
+export const showActive = async (c: Context) => {
   const user = c.get("user");
 
-
- const activeCommittees = await db
-  .select()
-  .from(committee)
-  .where(isNull(committee.end));
+  const activeCommittees = await db
+    .select()
+    .from(committee)
+    .where(isNull(committee.end));
 
   return activeCommittees;
+};
+
+
+export const showPositions = async (number: string, c: Context) => {
+  const poss = await db
+  .selectDistinct({ position: executives.position })
+  .from(executives)
+  .where(eq(executives.number, number));
+  return poss;
 };

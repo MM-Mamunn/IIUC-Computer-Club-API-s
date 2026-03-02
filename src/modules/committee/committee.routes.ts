@@ -1,21 +1,25 @@
 import { Hono } from "hono";
-import {  activeCommittees, newCommittee } from "./committee.controller";
+import { activeCommittees, newCommittee,positions } from "./committee.controller";
 import { requireRole } from "../../middlewares/role.middleware";
 import { authMiddleware } from "../../middlewares/auth.middleware";
-import {getRolesByPriorityRange} from "../global/global.service";
+import { getRolesByPriorityRange } from "../global/global.service";
+
 
 const router = new Hono();
 
 router.post(
   "/new",
   authMiddleware,
-  requireRole(await getRolesByPriorityRange(1,1)),
+  requireRole(await getRolesByPriorityRange(1, 1)),
   newCommittee,
 );
 
-router.get(
-  "/active",
-  activeCommittees,
+router.get("/active", activeCommittees);
+
+router.post(
+  "/positions",
+  positions,
 );
+
 
 export default router;
