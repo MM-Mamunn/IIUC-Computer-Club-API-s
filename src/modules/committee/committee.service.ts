@@ -1,7 +1,7 @@
 // committee.service.ts
 import type { Context } from "hono";
 import { db } from "../../config/db";
-import { committee, executives, positions, users } from "../../db/schema";
+import { committee, executives } from "../../db/schema";
 import { HTTPException } from "hono/http-exception";
 import { and, eq, isNull } from "drizzle-orm";
 // import { positions } from "./committee.controller";
@@ -99,9 +99,15 @@ export const showActive = async (c: Context) => {
   const user = c.get("user");
 
   const activeCommittees = await db
-    .select()
-    .from(committee)
-    .where(isNull(committee.end));
+  .select({
+    number: committee.number,
+    gender: committee.gender,
+    start: committee.start,
+    end: committee.end,
+    description: committee.description,
+  })
+  .from(committee)
+  .where(isNull(committee.end));
 
   return activeCommittees;
 };

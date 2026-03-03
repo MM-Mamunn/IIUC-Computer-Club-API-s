@@ -8,7 +8,6 @@ import {
   doublePrecision,
   integer 
 } from "drizzle-orm/pg-core";
-import { sql } from "drizzle-orm";
 
 /* =========================
    POSITION TABLE
