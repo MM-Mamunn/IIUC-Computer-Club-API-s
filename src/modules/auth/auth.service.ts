@@ -1,10 +1,11 @@
 import { db } from "../../config/db";
 import { executives, positions, users } from "../../db/schema";
-import { eq,sql } from "drizzle-orm";
+import { desc, eq,sql } from "drizzle-orm";
 import { hashPassword, comparePassword } from "../../utils/hash";
 import { generateToken } from "../../utils/jwt";
 import { HTTPException } from "hono/http-exception";
 import type { Context } from "hono";
+
 
 export const registerUser = async (id: string,name: string, email: string, password: string) => {
  console.log("auth service registerUser");
@@ -83,4 +84,25 @@ export const saveImage = async (
 return {
   profileImage: updatedUser.profileImage
 };
+};
+
+export const showMe = async (
+  c: Context
+) => {
+  const user = c.get("user");
+  const userId = user.id;
+  if (!userId) {
+    throw new HTTPException(400, { message: "User ID required" });
+  }
+
+  const [me] = await db
+    .select({id: users.id, name: users.name, email: users.email, gender: users.gender, profileImage: users.profileImage,description: users.description, createdat: users.createdAt})
+    .from(users)
+    .where(eq(users.id, user.id));
+
+
+  if (!me) {
+    throw new HTTPException(404, { message: "User not found" });
+  }
+return me;
 };
