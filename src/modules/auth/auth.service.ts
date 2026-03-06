@@ -12,8 +12,13 @@ export const registerUser = async (
   name: string,
   email: string,
   password: string,
+  gender:string,
 ) => {
+  console.log(id, name, email, gender, password);
   
+  if(gender !== "male" && gender  !== "female"){
+    throw new HTTPException(400, { message: "Invalid gender. Please specify 'male' or 'female'" });
+  }
   const existing = await db
     .select()
     .from(users)
@@ -31,7 +36,7 @@ export const registerUser = async (
 
   const [newUser] = await db
     .insert(users)
-    .values({ id: id, name: name, email: email, password: hashed })
+    .values({ id, name: name, email: email, password: hashed, gender: gender})
     .returning();
 
   if (!newUser) {

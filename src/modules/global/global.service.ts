@@ -51,10 +51,9 @@ export const genderMatch = async (id: string, number: string) => {
   // 🔹 Compare genders
   if (user.gender !== comm.gender) {
     throw new HTTPException(403, {
-      message: `This committee is only for ${comm.gender} members`,
+      message: `This committee is only for ${comm.gender} members/ Gender doesn't match user's gender`,
     });
   }
-
-  // If matched, return success
+ 
   return true;
 };

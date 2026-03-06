@@ -3,15 +3,18 @@ import { registerUser, loginUser, saveImage, showMe, updateUser, changePassword 
 import { uploadImageToCloudinary } from "../../utils/uploadImage";
 
 export const register = async (c: Context) => {
-  console.log("in auth controller register function");
+  const {
+    id: id,
+    name: name,
+    email: email,
+    password: password,
+    gender: gender,
+  } = await c.req.json();
 
-  const { id, name, email, password } = await c.req.json();
-  console.log(id, name, email, password);
+  const user = await registerUser(id, name, email, password,gender);
 
-  const user = await registerUser(id, name, email, password);
   return c.json({ token: user.token.token }, 201);
 };
-
 export const login = async (c: Context) => {
   console.log("in controller log in");
 

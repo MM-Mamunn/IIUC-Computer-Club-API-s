@@ -4,6 +4,7 @@ import { db } from "../../config/db";
 import { committee, executives } from "../../db/schema";
 import { HTTPException } from "hono/http-exception";
 import { and, eq, isNull } from "drizzle-orm";
+import { genderMatch } from "../global/global.service";
 // import { positions } from "./committee.controller";
 
 export const addCommittee = async (
@@ -15,14 +16,17 @@ export const addCommittee = async (
   description: string | null, // accept string | null
   c: Context,
 ) => {
-  const user = c.get("user");
-
   if (!number || !start || !gender) {
     throw new HTTPException(400, {
       message: "number, start and gender are required",
     });
   }
-
+ const user = c.get("user");
+ if(await genderMatch(user.id, number) === false){
+  throw new HTTPException(403, {
+    message: "You cannot create a committee for a different gender",
+  });
+ }
   if (isNaN(Date.parse(start))) {
     throw new HTTPException(400, {
       message: "Invalid start date format",

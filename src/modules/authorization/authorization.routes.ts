@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { addVp, addTrsr, addAGS, addGS,addSec } from "./authorization.controller";
+import { addVp, addTrsr, addAGS, addGS,addSec, delMem } from "./authorization.controller";
 import { requireRole } from "../../middlewares/role.middleware";
 import { authMiddleware } from "../../middlewares/auth.middleware";
 import {getRolesByPriorityRange} from "../global/global.service";
@@ -36,5 +36,11 @@ router.post(
   authMiddleware,
   requireRole(await getRolesByPriorityRange(1,4)),
   addSec,
+);
+router.delete(
+  "/delete",
+  authMiddleware,
+  requireRole(await getRolesByPriorityRange(1,2)),
+  delMem,
 );
 export default router;
