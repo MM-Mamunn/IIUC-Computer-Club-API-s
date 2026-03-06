@@ -96,7 +96,7 @@ export const addCommittee = async (
 };
 
 export const showActive = async (c: Context) => {
-  const user = c.get("user");
+
 
   const activeCommittees = await db
   .select({

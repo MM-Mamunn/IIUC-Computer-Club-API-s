@@ -12,8 +12,7 @@ export const registerUser = async (
   email: string,
   password: string,
 ) => {
-  console.log("auth service registerUser");
-
+  
   const existing = await db
     .select()
     .from(users)
@@ -23,8 +22,11 @@ export const registerUser = async (
     throw new HTTPException(409, { message: `user ${id} already exists` });
   }
 
+  if(password.length < 6){
+    throw new HTTPException(400, { message: "Password must be at least 6 characters" });
+  }
+
   const hashed = await hashPassword(password);
-  console.log(id, name, email, hashed);
 
   const [newUser] = await db
     .insert(users)
@@ -154,4 +156,51 @@ export const updateUser = async (data: UpdateUserInput, c: Context) => {
   }
 
   return updatedUser;
+};
+
+
+
+
+// FUNCTIONS TO ADD VICE PRESIDENT
+export const changePassword = async (currentPassword: string, newPassword: string, c: Context) => {
+  
+     const user = c.get("user");
+const [use] = await db.select().from(users).where(eq(users.id, user.id));
+
+  if (!use) {
+    throw new HTTPException(401, { message: "Invalid credentials" });
+  }
+
+  const valid = await comparePassword(currentPassword, use.password);
+
+  if (!valid) {
+    throw new HTTPException(401, { message: "Invalid credentials" });
+  }
+
+
+  
+  if(newPassword.length < 6){
+    throw new HTTPException(400, { message: "New Password must be at least 6 characters" });
+  }
+
+  const hashed = await hashPassword(newPassword);
+
+  const [updatedUser] = await db
+  .update(users)
+  .set({
+    password: hashed,
+  })
+  .where(eq(users.id, use.id))
+  .returning({
+    id: users.id,
+    name: users.name,
+    email: users.email,
+  });
+
+  if (!updatedUser) {
+    throw new HTTPException(401, { message: "Failed to create user" });
+  }
+  const token = await loginUser(use.id, newPassword);
+  // return newUser;
+  return { token };
 };
