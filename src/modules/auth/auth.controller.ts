@@ -1,5 +1,5 @@
 import type { Context } from "hono";
-import { registerUser, loginUser, saveImage, showMe } from "./auth.service";
+import { registerUser, loginUser, saveImage, showMe, updateUser } from "./auth.service";
 import { uploadImageToCloudinary } from "../../utils/uploadImage";
 
 export const register = async (c: Context) => {
@@ -44,4 +44,20 @@ export const uploadImage = async (c: Context) => {
 export const me = async (c: Context) => {
   const me = await showMe(c);
   return c.json({ me }, 200);
+};
+
+
+export const updateUserController = async (c: Context) => {
+  const body = await c.req.json();
+
+  const user = await updateUser(body, c);
+
+  return c.json(
+    {
+      success: true,
+      message: "Profile updated",
+      user,
+    },
+    200
+  );
 };

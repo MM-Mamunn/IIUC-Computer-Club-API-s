@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { register, login, uploadImage, me } from "./auth.controller";
+import { register, login, uploadImage, me, updateUserController } from "./auth.controller";
 import { authMiddleware } from "../../middlewares/auth.middleware";
 
 const router = new Hono();
@@ -16,5 +16,11 @@ router.get(
   "/me",
   authMiddleware,
     me,
+);
+
+router.put(
+  "/update",
+  authMiddleware,
+   updateUserController,
 );
 export default router;

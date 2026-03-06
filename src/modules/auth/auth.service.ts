@@ -1,29 +1,37 @@
 import { db } from "../../config/db";
-import { executives, positions, users } from "../../db/schema";
-import { desc, eq,sql } from "drizzle-orm";
+import { executives, users } from "../../db/schema";
+import { eq, sql } from "drizzle-orm";
 import { hashPassword, comparePassword } from "../../utils/hash";
 import { generateToken } from "../../utils/jwt";
 import { HTTPException } from "hono/http-exception";
 import type { Context } from "hono";
 
+export const registerUser = async (
+  id: string,
+  name: string,
+  email: string,
+  password: string,
+) => {
+  console.log("auth service registerUser");
 
-export const registerUser = async (id: string,name: string, email: string, password: string) => {
- console.log("auth service registerUser");
- 
-  const existing = await db.select().from(users).where(eq(sql`upper(${users.id})`, id.toUpperCase()));
+  const existing = await db
+    .select()
+    .from(users)
+    .where(eq(sql`upper(${users.id})`, id.toUpperCase()));
 
   if (existing.length > 0) {
     throw new HTTPException(409, { message: `user ${id} already exists` });
   }
 
   const hashed = await hashPassword(password);
-  console.log(id,name, email, hashed);
-  
-  const [newUser] = await db.insert(users)
-    .values({id: id, name: name, email : email, password: hashed  })
+  console.log(id, name, email, hashed);
+
+  const [newUser] = await db
+    .insert(users)
+    .values({ id: id, name: name, email: email, password: hashed })
     .returning();
 
-     if (!newUser) {
+  if (!newUser) {
     throw new HTTPException(401, { message: "Failed to create user" });
   }
   const token = await loginUser(id, password);
@@ -31,10 +39,7 @@ export const registerUser = async (id: string,name: string, email: string, passw
   return { token };
 };
 export const loginUser = async (id: string, password: string) => {
-  const [user] = await db
-    .select()
-    .from(users)
-    .where(eq(users.id, id));
+  const [user] = await db.select().from(users).where(eq(users.id, id));
 
   if (!user) {
     throw new HTTPException(401, { message: "Invalid credentials" });
@@ -46,10 +51,7 @@ export const loginUser = async (id: string, password: string) => {
     throw new HTTPException(401, { message: "Invalid credentials" });
   }
 
-  const [pos] = await db
-    .select()
-    .from(executives)
-    .where(eq(executives.id, id));
+  const [pos] = await db.select().from(executives).where(eq(executives.id, id));
 
   const token = generateToken({
     id: user.id,
@@ -60,12 +62,7 @@ export const loginUser = async (id: string, password: string) => {
   return { token };
 };
 
-
-
-export const saveImage = async (
-  imageUrl: string,
-  c: Context
-) => {
+export const saveImage = async (imageUrl: string, c: Context) => {
   const user = c.get("user");
   const userId = user.id;
   if (!userId) {
@@ -81,14 +78,12 @@ export const saveImage = async (
   if (!updatedUser) {
     throw new HTTPException(404, { message: "User not found" });
   }
-return {
-  profileImage: updatedUser.profileImage
-};
+  return {
+    profileImage: updatedUser.profileImage,
+  };
 };
 
-export const showMe = async (
-  c: Context
-) => {
+export const showMe = async (c: Context) => {
   const user = c.get("user");
   const userId = user.id;
   if (!userId) {
@@ -96,13 +91,67 @@ export const showMe = async (
   }
 
   const [me] = await db
-    .select({id: users.id, name: users.name, email: users.email, gender: users.gender, profileImage: users.profileImage,description: users.description, createdat: users.createdAt})
+    .select({
+      id: users.id,
+      name: users.name,
+      email: users.email,
+      gender: users.gender,
+      profileImage: users.profileImage,
+      description: users.description,
+      createdat: users.createdAt,
+    })
     .from(users)
     .where(eq(users.id, user.id));
-
 
   if (!me) {
     throw new HTTPException(404, { message: "User not found" });
   }
-return me;
+  return me;
+};
+
+type UpdateUserInput = {
+  id?: string;
+  name?: string;
+  email?: string;
+  gender?: string;
+  profileImage?: string;
+  description?: string;
+};
+
+export const updateUser = async (data: UpdateUserInput, c: Context) => {
+  const { ...fields } = data;
+  const user = c.get("user");
+  if (!user.id) {
+    throw new HTTPException(400, { message: "User id is required" });
+  }
+
+  // remove undefined fields
+  const updateData = Object.fromEntries(
+    Object.entries(fields).filter(([, v]) => v !== undefined),
+  );
+
+  if (Object.keys(updateData).length === 0) {
+    throw new HTTPException(400, { message: "No fields provided for update" });
+  }
+  if(updateData.password){
+    throw new HTTPException(400, { message: "Can't change password through this endpoint" });
+  }
+  const [updatedUser] = await db
+  .update(users)
+  .set(updateData)
+  .where(eq(users.id, user.id))
+  .returning({
+    id: users.id,
+    name: users.name,
+    gender: users.gender,
+    email: users.email,
+    description: users.description,
+    profileImage: users.profileImage,
+    createdAt: users.createdAt,
+  });
+  if (!updatedUser) {
+    throw new HTTPException(404, { message: "User not found" });
+  }
+
+  return updatedUser;
 };
