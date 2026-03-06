@@ -95,7 +95,7 @@ export const addCommittee = async (
   return newCommittee;
 };
 
-export const showActive = async (c: Context) => {
+export const showActive = async () => {
 
 
   const activeCommittees = await db

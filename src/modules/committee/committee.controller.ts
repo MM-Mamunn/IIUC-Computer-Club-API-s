@@ -29,8 +29,9 @@ export const newCommittee = async (c: Context) => {
   return c.json({ committee }, 201);
 };
 export const activeCommittees = async (c: Context) => {
-  const active = await showActive(c);
-
+  const active = await showActive();
+  
+  
   return c.json({ active }, 201);
 };
 

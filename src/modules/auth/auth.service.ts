@@ -1,10 +1,11 @@
 import { db } from "../../config/db";
 import { executives, users } from "../../db/schema";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { hashPassword, comparePassword } from "../../utils/hash";
 import { generateToken } from "../../utils/jwt";
 import { HTTPException } from "hono/http-exception";
 import type { Context } from "hono";
+import { showActive } from "../committee/committee.service";
 
 export const registerUser = async (
   id: string,
@@ -53,8 +54,18 @@ export const loginUser = async (id: string, password: string) => {
     throw new HTTPException(401, { message: "Invalid credentials" });
   }
 
-  const [pos] = await db.select().from(executives).where(eq(executives.id, id));
+  const active= await showActive();
+  const activeNumbers = active.map((a) => a.number);
 
+const [pos] = await db
+  .select()
+  .from(executives)
+  .where(
+    and(
+      eq(executives.id, id),
+      inArray(executives.number, activeNumbers)
+    )
+  );
   const token = generateToken({
     id: user.id,
     role: pos?.role ?? "",
