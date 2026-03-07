@@ -18,6 +18,11 @@ import {
   saveDraftData,
   getDraftData,
   guestRegisterForEvent,
+  addEventManager,
+  removeEventManager,
+  getEventManagers,
+  getMyManagedEvents,
+  isEventManager,
 } from './event.service';
 import { uploadImageToCloudinary } from '../../utils/uploadImage';
 
@@ -270,4 +275,48 @@ export const guestRegister = async (c: Context) => {
   });
 
   return c.json(result, 201);
+};
+
+// ─── Event Manager Controllers ───
+
+export const addManagerController = async (c: Context) => {
+  const id = parseInt(c.req.param('id'));
+  if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
+  const { userId } = await c.req.json();
+  if (!userId) return c.json({ message: 'userId is required' }, 400);
+  const user = c.get('user');
+  const manager = await addEventManager(id, userId, user.id);
+  return c.json({ manager }, 201);
+};
+
+export const removeManagerController = async (c: Context) => {
+  const id = parseInt(c.req.param('id'));
+  if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
+  const { userId } = await c.req.json();
+  if (!userId) return c.json({ message: 'userId is required' }, 400);
+  const result = await removeEventManager(id, userId);
+  return c.json(result, 200);
+};
+
+export const managersController = async (c: Context) => {
+  const id = parseInt(c.req.param('id'));
+  if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
+  const managers = await getEventManagers(id);
+  return c.json({ managers }, 200);
+};
+
+export const myManagedEventsController = async (c: Context) => {
+  const user = c.get('user');
+  const events = await getMyManagedEvents(user.id);
+  return c.json({ events }, 200);
+};
+
+export const managedEventRegistrations = async (c: Context) => {
+  const id = parseInt(c.req.param('id'));
+  if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
+  const user = c.get('user');
+  const allowed = await isEventManager(id, user.id);
+  if (!allowed) return c.json({ message: 'You are not a manager for this event' }, 403);
+  const regs = await getEventRegistrations(id);
+  return c.json({ registrations: regs }, 200);
 };

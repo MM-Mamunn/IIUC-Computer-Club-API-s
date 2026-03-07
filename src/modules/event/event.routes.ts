@@ -21,6 +21,11 @@ import {
   saveDraft,
   getDraft,
   guestRegister,
+  addManagerController,
+  removeManagerController,
+  managersController,
+  myManagedEventsController,
+  managedEventRegistrations,
 } from './event.controller';
 import { initiateSslcommerzPayment, handleSslcommerzIpn } from './sslcommerz.service';
 import type { Context } from 'hono';
@@ -131,5 +136,28 @@ router.delete(
 );
 
 router.get('/:id/duties', authMiddleware, duties);
+
+// ─── Event Manager delegation ───
+router.get('/me/managed-events', authMiddleware, myManagedEventsController);
+router.get('/:id/managed-registrations', authMiddleware, managedEventRegistrations);
+
+router.post(
+  '/:id/managers',
+  authMiddleware,
+  requireRole(await getRolesByPriorityRange(1, 4)),
+  addManagerController,
+);
+router.delete(
+  '/:id/managers',
+  authMiddleware,
+  requireRole(await getRolesByPriorityRange(1, 4)),
+  removeManagerController,
+);
+router.get(
+  '/:id/managers',
+  authMiddleware,
+  requireRole(await getRolesByPriorityRange(1, 4)),
+  managersController,
+);
 
 export default router;

@@ -172,3 +172,36 @@ export const eventDuties = pgTable(
     pk: primaryKey({ columns: [table.eventId, table.userId, table.duty] }),
   }),
 );
+
+/* =========================
+   EVENT MANAGERS TABLE
+   (delegate limited access to specific events)
+========================= */
+export const eventManagers = pgTable(
+  'event_managers',
+  {
+    eventId: integer('event_id')
+      .notNull()
+      .references(() => events.id, {
+        onDelete: 'cascade',
+        onUpdate: 'cascade',
+      }),
+
+    userId: varchar('user_id', { length: 255 })
+      .notNull()
+      .references(() => users.id, {
+        onDelete: 'cascade',
+        onUpdate: 'cascade',
+      }),
+
+    assignedBy: varchar('assigned_by', { length: 255 }).references(() => users.id, {
+      onDelete: 'set null',
+      onUpdate: 'cascade',
+    }),
+
+    assignedAt: timestamp('assigned_at', { withTimezone: true }).defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.eventId, table.userId] }),
+  }),
+);

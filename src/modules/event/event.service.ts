@@ -1,5 +1,5 @@
 import { db } from '../../config/db';
-import { events, eventRegistrations, eventDuties } from '../../db/event.schema';
+import { events, eventRegistrations, eventDuties, eventManagers } from '../../db/event.schema';
 import { users } from '../../db/schema';
 import { eq, desc, and, sql, count } from 'drizzle-orm';
 import { HTTPException } from 'hono/http-exception';
@@ -634,4 +634,85 @@ export const getMyRegistrations = async (userId: string) => {
     .orderBy(desc(events.eventDate));
 
   return registrations;
+};
+
+// ─── Event Managers (delegation) ───
+
+/** Check if a user is an event manager for a specific event. */
+export const isEventManager = async (eventId: number, userId: string): Promise<boolean> => {
+  const [row] = await db
+    .select()
+    .from(eventManagers)
+    .where(and(eq(eventManagers.eventId, eventId), eq(eventManagers.userId, userId)));
+  return !!row;
+};
+
+/** Assign a user as manager for a specific event. */
+export const addEventManager = async (eventId: number, userId: string, assignedBy: string) => {
+  const [event] = await db.select().from(events).where(eq(events.id, eventId));
+  if (!event) throw new HTTPException(404, { message: 'Event not found' });
+
+  const [userExists] = await db.select().from(users).where(eq(users.id, userId));
+  if (!userExists) throw new HTTPException(404, { message: 'User not found' });
+
+  const [existing] = await db
+    .select()
+    .from(eventManagers)
+    .where(and(eq(eventManagers.eventId, eventId), eq(eventManagers.userId, userId)));
+  if (existing)
+    throw new HTTPException(409, { message: 'User is already a manager for this event' });
+
+  const [row] = await db.insert(eventManagers).values({ eventId, userId, assignedBy }).returning();
+  return row;
+};
+
+/** Remove a user as manager for a specific event. */
+export const removeEventManager = async (eventId: number, userId: string) => {
+  const [existing] = await db
+    .select()
+    .from(eventManagers)
+    .where(and(eq(eventManagers.eventId, eventId), eq(eventManagers.userId, userId)));
+  if (!existing) throw new HTTPException(404, { message: 'Manager assignment not found' });
+
+  await db
+    .delete(eventManagers)
+    .where(and(eq(eventManagers.eventId, eventId), eq(eventManagers.userId, userId)));
+  return { success: true, message: 'Manager removed' };
+};
+
+/** Get all managers for a specific event. */
+export const getEventManagers = async (eventId: number) => {
+  return db
+    .select({
+      userId: eventManagers.userId,
+      name: users.name,
+      email: users.email,
+      profileImage: users.profileImage,
+      assignedBy: eventManagers.assignedBy,
+      assignedAt: eventManagers.assignedAt,
+    })
+    .from(eventManagers)
+    .innerJoin(users, eq(eventManagers.userId, users.id))
+    .where(eq(eventManagers.eventId, eventId));
+};
+
+/** Get all events a user is assigned to manage. */
+export const getMyManagedEvents = async (userId: string) => {
+  const rows = await db
+    .select({
+      eventId: eventManagers.eventId,
+      title: events.title,
+      eventDate: events.eventDate,
+      venue: events.venue,
+      status: events.status,
+      bannerImage: events.bannerImage,
+      isPaid: events.isPaid,
+      fee: events.fee,
+      assignedAt: eventManagers.assignedAt,
+    })
+    .from(eventManagers)
+    .innerJoin(events, eq(eventManagers.eventId, events.id))
+    .where(eq(eventManagers.userId, userId))
+    .orderBy(desc(events.eventDate));
+  return rows;
 };
