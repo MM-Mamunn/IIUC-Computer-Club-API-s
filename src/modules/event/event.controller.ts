@@ -1,0 +1,273 @@
+import type { Context } from 'hono';
+import {
+  createEvent,
+  listEvents,
+  getEventById,
+  updateEvent,
+  deleteEvent,
+  registerForEvent,
+  unregisterFromEvent,
+  getEventRegistrations,
+  assignDuty,
+  removeDuty,
+  getEventDuties,
+  getMyDuties,
+  getMyRegistrations,
+  submitPayment,
+  verifyPayment,
+  saveDraftData,
+  getDraftData,
+  guestRegisterForEvent,
+} from './event.service';
+import { uploadImageToCloudinary } from '../../utils/uploadImage';
+
+export const create = async (c: Context) => {
+  const contentType = c.req.header('content-type') ?? '';
+
+  let data: Record<string, unknown>;
+
+  if (contentType.includes('multipart/form-data')) {
+    const formData = await c.req.formData();
+    data = {
+      title: formData.get('title') as string,
+      description: (formData.get('description') as string) || undefined,
+      committeeNumber: formData.get('committeeNumber') as string,
+      eventDate: formData.get('eventDate') as string,
+      registrationDeadline: (formData.get('registrationDeadline') as string) || undefined,
+      venue: (formData.get('venue') as string) || undefined,
+      isPaid: formData.get('isPaid') === 'true',
+      fee: formData.get('fee') ? Number(formData.get('fee')) : 0,
+      maxParticipants: formData.get('maxParticipants')
+        ? Number(formData.get('maxParticipants'))
+        : undefined,
+      sslcommerzEnabled: formData.get('sslcommerzEnabled') === 'true',
+    };
+
+    // Parse paymentNumbers JSON
+    const pnRaw = formData.get('paymentNumbers') as string;
+    if (pnRaw) {
+      try {
+        data.paymentNumbers = JSON.parse(pnRaw);
+      } catch {
+        /* ignore parse error */
+      }
+    }
+
+    // Parse customFields JSON
+    const cfRaw = formData.get('customFields') as string;
+    if (cfRaw) {
+      try {
+        data.customFields = JSON.parse(cfRaw);
+      } catch {
+        /* ignore parse error */
+      }
+    }
+
+    // Handle banner upload
+    const bannerFile = formData.get('banner') as File | null;
+    if (bannerFile && bannerFile.size > 0) {
+      data.bannerImage = await uploadImageToCloudinary(bannerFile);
+    }
+  } else {
+    data = await c.req.json();
+  }
+
+  const event = await createEvent(data as any, c);
+  return c.json({ event }, 201);
+};
+
+export const list = async (c: Context) => {
+  const committeeNumber = c.req.query('committee');
+  const status = c.req.query('status');
+  const eventsList = await listEvents(committeeNumber, status);
+  return c.json({ events: eventsList }, 200);
+};
+
+export const getOne = async (c: Context) => {
+  const id = parseInt(c.req.param('id'));
+  if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
+  const event = await getEventById(id);
+  return c.json({ event }, 200);
+};
+
+export const update = async (c: Context) => {
+  const id = parseInt(c.req.param('id'));
+  if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
+
+  const contentType = c.req.header('content-type') ?? '';
+  let data: Record<string, unknown>;
+
+  if (contentType.includes('multipart/form-data')) {
+    const formData = await c.req.formData();
+    data = {};
+    for (const [key, value] of formData.entries()) {
+      if (key === 'banner') continue; // handle separately
+      if (key === 'paymentNumbers') {
+        try {
+          data.paymentNumbers = JSON.parse(value as string);
+        } catch {
+          /* skip */
+        }
+        continue;
+      }
+      if (key === 'customFields') {
+        try {
+          data.customFields = JSON.parse(value as string);
+        } catch {
+          /* skip */
+        }
+        continue;
+      }
+      if (key === 'isPaid' || key === 'sslcommerzEnabled') {
+        data[key] = value === 'true';
+        continue;
+      }
+      if (key === 'fee' || key === 'maxParticipants') {
+        data[key] = value ? Number(value) : undefined;
+        continue;
+      }
+      data[key] = value || undefined;
+    }
+
+    const bannerFile = formData.get('banner') as File | null;
+    if (bannerFile && bannerFile.size > 0) {
+      data.bannerImage = await uploadImageToCloudinary(bannerFile);
+    }
+  } else {
+    data = await c.req.json();
+  }
+
+  const event = await updateEvent(id, data);
+  return c.json({ event }, 200);
+};
+
+export const remove = async (c: Context) => {
+  const id = parseInt(c.req.param('id'));
+  if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
+  const result = await deleteEvent(id);
+  return c.json(result, 200);
+};
+
+export const register = async (c: Context) => {
+  const id = parseInt(c.req.param('id'));
+  if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
+  const user = c.get('user');
+  const body = await c.req.json().catch(() => ({}));
+  const reg = await registerForEvent(
+    id,
+    user.id,
+    body.paymentMethod,
+    body.transactionId,
+    body.customFieldResponses,
+  );
+  return c.json({ registration: reg }, 201);
+};
+
+export const unregister = async (c: Context) => {
+  const id = parseInt(c.req.param('id'));
+  if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
+  const user = c.get('user');
+  const result = await unregisterFromEvent(id, user.id);
+  return c.json(result, 200);
+};
+
+export const registrations = async (c: Context) => {
+  const id = parseInt(c.req.param('id'));
+  if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
+  const regs = await getEventRegistrations(id);
+  return c.json({ registrations: regs }, 200);
+};
+
+export const submitPaymentController = async (c: Context) => {
+  const id = parseInt(c.req.param('id'));
+  if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
+  const user = c.get('user');
+  const { paymentMethod, transactionId } = await c.req.json();
+  const result = await submitPayment(id, user.id, paymentMethod, transactionId);
+  return c.json({ registration: result }, 200);
+};
+
+export const verifyPaymentController = async (c: Context) => {
+  const id = parseInt(c.req.param('id'));
+  if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
+  const { userId, verified } = await c.req.json();
+  if (!userId) return c.json({ message: 'userId is required' }, 400);
+  const result = await verifyPayment(id, userId, verified !== false);
+  return c.json({ registration: result }, 200);
+};
+
+export const saveDraft = async (c: Context) => {
+  const id = parseInt(c.req.param('id'));
+  if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
+  const user = c.get('user');
+  const { draftData } = await c.req.json();
+  const result = await saveDraftData(id, user.id, draftData);
+  return c.json({ draft: result }, 200);
+};
+
+export const getDraft = async (c: Context) => {
+  const id = parseInt(c.req.param('id'));
+  if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
+  const user = c.get('user');
+  const draftData = await getDraftData(id, user.id);
+  return c.json({ draftData }, 200);
+};
+
+export const assignDutyController = async (c: Context) => {
+  const id = parseInt(c.req.param('id'));
+  if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
+  const { userId, duty, description } = await c.req.json();
+  if (!userId || !duty) return c.json({ message: 'userId and duty are required' }, 400);
+  const dutyRecord = await assignDuty(id, userId, duty, description ?? null, c);
+  return c.json({ duty: dutyRecord }, 201);
+};
+
+export const removeDutyController = async (c: Context) => {
+  const id = parseInt(c.req.param('id'));
+  if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
+  const { userId, duty } = await c.req.json();
+  if (!userId || !duty) return c.json({ message: 'userId and duty are required' }, 400);
+  const result = await removeDuty(id, userId, duty);
+  return c.json(result, 200);
+};
+
+export const duties = async (c: Context) => {
+  const id = parseInt(c.req.param('id'));
+  if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
+  const dutiesList = await getEventDuties(id);
+  return c.json({ duties: dutiesList }, 200);
+};
+
+export const myDuties = async (c: Context) => {
+  const user = c.get('user');
+  const dutiesList = await getMyDuties(user.id);
+  return c.json({ duties: dutiesList }, 200);
+};
+
+export const myRegistrations = async (c: Context) => {
+  const user = c.get('user');
+  const regs = await getMyRegistrations(user.id);
+  return c.json({ registrations: regs }, 200);
+};
+
+export const guestRegister = async (c: Context) => {
+  const id = parseInt(c.req.param('id'));
+  if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
+  const body = await c.req.json();
+
+  if (!body.studentId || !body.email || !body.name || !body.gender) {
+    return c.json({ message: 'studentId, email, name, and gender are required' }, 400);
+  }
+
+  const result = await guestRegisterForEvent(id, {
+    studentId: body.studentId,
+    email: body.email,
+    name: body.name,
+    gender: body.gender,
+    customFieldResponses: body.customFieldResponses,
+    paymentMethod: body.paymentMethod,
+    transactionId: body.transactionId,
+  });
+
+  return c.json(result, 201);
+};
