@@ -31,7 +31,6 @@ export const addGS = async (c: Context) => {
 };
 
 export const addAGS = async (c: Context) => {
-  console.log("Testing in");
   
   const { id, role, number } = await c.req.json();
   await genderMatch(id, number);

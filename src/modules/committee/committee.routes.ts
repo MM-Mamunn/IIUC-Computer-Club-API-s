@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { activeCommittees, newCommittee,positions } from "./committee.controller";
+import { activeCommittees, allExec, newCommittee,positions } from "./committee.controller";
 import { requireRole } from "../../middlewares/role.middleware";
 import { authMiddleware } from "../../middlewares/auth.middleware";
 import { getRolesByPriorityRange } from "../global/global.service";
@@ -20,6 +20,8 @@ router.post(
   "/positions",
   positions,
 );
+
+router.get("/executives/:number/:page/:limit",authMiddleware,allExec);
 
 
 export default router;

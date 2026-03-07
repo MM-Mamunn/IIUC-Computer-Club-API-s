@@ -1,5 +1,5 @@
 import type { Context } from "hono";
-import { addCommittee, showActive, showPositions } from "./committee.service";
+import { addCommittee, allExecutives, showActive, showPositions } from "./committee.service";
 
 
 // committee.controller.ts
@@ -39,4 +39,13 @@ export const positions = async (c: Context) => {
   const {  number } = await c.req.json();
   const pos = await showPositions( number, c);
   return c.json({ pos }, 201);
+};
+export const allExec = async (c: Context) => {
+  const {  number } =  c.req.param();
+  const page = Number(c.req.param("page")) || 1;
+const limit = Number(c.req.param("limit")) || 10;
+console.log(page, limit);
+
+  const all = await allExecutives( number,page, limit, c);
+  return c.json(all, 200);
 };

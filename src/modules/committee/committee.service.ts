@@ -22,11 +22,11 @@ export const addCommittee = async (
     });
   }
  const user = c.get("user");
- if(await genderMatch(user.id, number) === false){
-  throw new HTTPException(403, {
-    message: "You cannot create a committee for a different gender",
-  });
- }
+//  if(await genderMatch(user.id, number) === false){
+//   throw new HTTPException(403, {
+//     message: "You cannot create a committee for a different gender",
+//   });
+//  }
   if (isNaN(Date.parse(start))) {
     throw new HTTPException(400, {
       message: "Invalid start date format",
@@ -123,4 +123,13 @@ export const showPositions = async (number: string, c: Context) => {
   .from(executives)
   .where(eq(executives.number, number));
   return poss;
+};
+export const allExecutives = async (number: string, page:number,limit: number, c: Context) => {
+  const offset = (page - 1) * limit;
+  const all = await db
+  .select( {id: executives.id, number: executives.number,role: executives.role, position: executives.position})
+  .from(executives)
+  .where(eq(executives.number, number)).limit(limit)
+  .offset(offset);;
+  return all;
 };

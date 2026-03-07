@@ -17,11 +17,7 @@ export const addVicePresident = async (id: string,role: string,number: string,c:
   if(role !== "vice president 1" && role !== "vice president 2" &&  role !== "vice president 3" && role !== "vice president 4"){
     throw new HTTPException(400, { message: `Invalid role ${role}. Must be vice president 1, 2, 3, or 4` });
   }
- if(await genderMatch(user.id, number) === false){
-  throw new HTTPException(403, {
-    message: "You cannot create a committee for a different gender",
-  });
- }
+
  const existing = await db
   .select()
   .from(executives)
@@ -61,11 +57,7 @@ export const addVicePresident = async (id: string,role: string,number: string,c:
 export const addTreasurer = async (id: string,number: string,c: Context) => {
 const user = c.get("user");   
 
- if(await genderMatch(user.id, number) === false){
-  throw new HTTPException(403, {
-    message: "You cannot create a committee for a different gender",
-  });
- }
+
 const existing = await db
   .select()
   .from(executives)
@@ -104,11 +96,7 @@ const existing = await db
 // FUNCTION TO ADD GENERAL SECRETARY
 export const addGeneralSecretary = async (id: string,number: string,c: Context) => {
 const user = c.get("user"); 
- if(await genderMatch(user.id, number) === false){
-  throw new HTTPException(403, {
-    message: "You cannot create a committee for a different gender",
-  });
- }  
+
 const existing = await db
   .select()
   .from(executives)
@@ -156,11 +144,7 @@ export const addAsstGeneralSecretary = async (id: string,role: string,number: st
       throw new HTTPException(409, { message: `role not in allowed range` });
       }
   
- if(await genderMatch(user.id, number) === false){
-  throw new HTTPException(403, {
-    message: "You cannot create a committee for a different gender",
-  });
- }
+
  const existing = await db
   .select()
   .from(executives)
@@ -208,11 +192,7 @@ export const addSecretaries = async (id: string,position : string, role: string,
       throw new HTTPException(409, { message: `role not in allowed range` });
       }
 
-   if(await genderMatch(user.id, number) === false){
-  throw new HTTPException(403, {
-    message: "You cannot create a committee for a different gender",
-  });
- }
+
   if(position == "president" || position == "general secretary" || position == "assistant general secretary" || position == "vice president" ){
     throw new HTTPException(400, { message: `Invalid position ${position}. Secretaries and assistant secretaries can't be in this position` });
   }
@@ -258,7 +238,7 @@ export const addSecretaries = async (id: string,position : string, role: string,
 
 
 
-// FUNCTION TO ADD GENERAL SECRETARY
+// FUNCTION TO ADD delete a member
 export const deleteMember = async (id: string,number: string,c: Context) => {
 const user = c.get("user"); 
  if(await genderMatch(user.id, number) === false){
@@ -280,7 +260,11 @@ const existing = await db
   }
   console.log(existing);
   
-  const [del] =
+  if(existing[0].role === "president"){
+    throw new HTTPException(403, {
+      message: "You cannot delete the president",
+    });
+  }
  await db
   .delete(executives)
   .where(
