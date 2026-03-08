@@ -289,6 +289,9 @@ export const expenseClaims = pgTable('expense_claims', {
   }),
 
   paidAt: timestamp('paid_at', { withTimezone: true }),
+
+  /** Proof of payment image URL (e.g. bank transfer screenshot) */
+  paymentProof: text('payment_proof'),
 });
 
 /* =========================

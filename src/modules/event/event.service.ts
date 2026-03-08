@@ -913,7 +913,11 @@ export const reviewExpenseClaim = async (
   return updated;
 };
 
-export const markClaimPaid = async (claimId: number, paidByUserId: string) => {
+export const markClaimPaid = async (
+  claimId: number,
+  paidByUserId: string,
+  paymentProof?: string,
+) => {
   const [claim] = await db.select().from(expenseClaims).where(eq(expenseClaims.id, claimId));
   if (!claim) throw new HTTPException(404, { message: 'Claim not found' });
   if (claim.status !== 'approved') {
@@ -926,6 +930,7 @@ export const markClaimPaid = async (claimId: number, paidByUserId: string) => {
       status: 'paid',
       paidBy: paidByUserId,
       paidAt: new Date(),
+      paymentProof: paymentProof ?? null,
     })
     .where(eq(expenseClaims.id, claimId))
     .returning();
@@ -961,6 +966,7 @@ export const getEventClaims = async (eventId: number) => {
       notes: expenseClaims.notes,
       paidBy: expenseClaims.paidBy,
       paidAt: expenseClaims.paidAt,
+      paymentProof: expenseClaims.paymentProof,
     })
     .from(expenseClaims)
     .leftJoin(claimerAlias, eq(expenseClaims.userId, claimerAlias.id))
@@ -981,6 +987,7 @@ export const getMyClaims = async (userId: string) => {
       submittedAt: expenseClaims.submittedAt,
       notes: expenseClaims.notes,
       paidAt: expenseClaims.paidAt,
+      paymentProof: expenseClaims.paymentProof,
     })
     .from(expenseClaims)
     .innerJoin(events, eq(expenseClaims.eventId, events.id))
@@ -1108,6 +1115,58 @@ export const generateVoucher = async (eventId: number, userId: string) => {
       },
       generatedBy: userId,
     })
+    .returning();
+
+  return voucher;
+};
+
+export const regenerateVoucher = async (eventId: number, userId: string) => {
+  const [event] = await db.select().from(events).where(eq(events.id, eventId));
+  if (!event) throw new HTTPException(404, { message: 'Event not found' });
+
+  const [existing] = await db
+    .select()
+    .from(vouchers)
+    .where(and(eq(vouchers.eventId, eventId), eq(vouchers.type, 'event_summary')));
+  if (!existing) throw new HTTPException(404, { message: 'No voucher exists to regenerate' });
+
+  const financials = await getEventFinancials(eventId);
+  const expenseList = await getEventExpenses(eventId);
+  const claimList = await getEventClaims(eventId);
+
+  const [voucher] = await db
+    .update(vouchers)
+    .set({
+      totalRevenue: financials.totalRevenue,
+      totalExpense: financials.totalExpense,
+      clubSubsidy: financials.clubSubsidy,
+      netAmount: financials.netAmount,
+      data: {
+        event: {
+          id: event.id,
+          title: event.title,
+          committeeNumber: event.committeeNumber,
+          eventDate: event.eventDate,
+          venue: event.venue,
+          isPaid: event.isPaid,
+          fee: event.fee,
+          estimatedBudget: event.estimatedBudget,
+        },
+        financials,
+        expenses: expenseList,
+        claims: claimList.map((c) => ({
+          id: c.id,
+          userName: c.userName,
+          description: c.description,
+          amount: c.amount,
+          status: c.status,
+        })),
+        generatedAt: new Date().toISOString(),
+      },
+      generatedBy: userId,
+      generatedAt: new Date(),
+    })
+    .where(eq(vouchers.id, existing.id))
     .returning();
 
   return voucher;

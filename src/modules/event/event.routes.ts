@@ -37,6 +37,7 @@ import {
   myClaimsController,
   financialsController,
   generateVoucherController,
+  regenerateVoucherController,
   getVoucherController,
 } from './event.controller';
 import { initiateSslcommerzPayment, handleSslcommerzIpn } from './sslcommerz.service';
@@ -232,6 +233,12 @@ router.post(
   authMiddleware,
   requireRole(await getRolesByPriorityRange(1, 5)),
   generateVoucherController,
+);
+router.put(
+  '/:id/voucher',
+  authMiddleware,
+  requireRole(await getRolesByPriorityRange(1, 5)),
+  regenerateVoucherController,
 );
 router.get(
   '/:id/voucher',

@@ -34,6 +34,7 @@ import {
   getMyClaims,
   getEventFinancials,
   generateVoucher,
+  regenerateVoucher,
   getEventVoucher,
 } from './event.service';
 import { uploadImageToCloudinary } from '../../utils/uploadImage';
@@ -458,7 +459,18 @@ export const markClaimPaidController = async (c: Context) => {
   const claimId = parseInt(c.req.param('claimId'));
   if (isNaN(claimId)) return c.json({ message: 'Invalid claim ID' }, 400);
   const user = c.get('user');
-  const claim = await markClaimPaid(claimId, user.id);
+
+  let paymentProofUrl: string | undefined;
+  const contentType = c.req.header('content-type') || '';
+  if (contentType.includes('multipart/form-data')) {
+    const formData = await c.req.formData();
+    const proofFile = formData.get('paymentProof') as File | null;
+    if (proofFile && proofFile.size > 0) {
+      paymentProofUrl = await uploadImageToCloudinary(proofFile);
+    }
+  }
+
+  const claim = await markClaimPaid(claimId, user.id, paymentProofUrl);
   return c.json({ claim }, 200);
 };
 
@@ -490,6 +502,14 @@ export const generateVoucherController = async (c: Context) => {
   const user = c.get('user');
   const voucher = await generateVoucher(id, user.id);
   return c.json({ voucher }, 201);
+};
+
+export const regenerateVoucherController = async (c: Context) => {
+  const id = parseInt(c.req.param('id'));
+  if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
+  const user = c.get('user');
+  const voucher = await regenerateVoucher(id, user.id);
+  return c.json({ voucher }, 200);
 };
 
 export const getVoucherController = async (c: Context) => {
