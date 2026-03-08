@@ -1,0 +1,1 @@
+ALTER TABLE "events" ADD COLUMN "gender_restriction" varchar(10) DEFAULT 'both' NOT NULL;

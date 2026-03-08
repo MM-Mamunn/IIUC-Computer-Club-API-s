@@ -27,7 +27,7 @@ export const initiateSslcommerzPayment = async (
   frontendBaseUrl: string,
 ) => {
   if (!SSLCOMMERZ_STORE_ID || !SSLCOMMERZ_STORE_PASSWORD) {
-    throw new HTTPException(500, { message: 'SSLCommerz is not configured' });
+    throw new HTTPException(500, { message: 'Payment service is currently unavailable. Please try again later.' });
   }
 
   const [event] = await db.select().from(events).where(eq(events.id, eventId));
@@ -91,7 +91,7 @@ export const initiateSslcommerzPayment = async (
 
   if (result.status !== 'SUCCESS') {
     throw new HTTPException(500, {
-      message: result.failedreason || 'Failed to initiate SSLCommerz payment',
+      message: 'Failed to initiate payment. Please try again later.',
     });
   }
 

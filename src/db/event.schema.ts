@@ -72,6 +72,14 @@ export const events = pgTable('events', {
    */
   customFields: jsonb('custom_fields'),
 
+  /**
+   * Gender restriction for participation:
+   * 'male' = only male students can register
+   * 'female' = only female students can register
+   * 'both' = anyone can register
+   */
+  genderRestriction: varchar('gender_restriction', { length: 10 }).notNull().default('both'),
+
   /** Who created the event */
   createdBy: varchar('created_by', { length: 255 })
     .notNull()

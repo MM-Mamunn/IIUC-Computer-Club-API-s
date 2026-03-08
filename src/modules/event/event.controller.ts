@@ -62,6 +62,7 @@ export const create = async (c: Context) => {
       estimatedBudget: formData.get('estimatedBudget')
         ? Number(formData.get('estimatedBudget'))
         : 0,
+      genderRestriction: (formData.get('genderRestriction') as string) || 'both',
     };
 
     // Parse paymentNumbers JSON

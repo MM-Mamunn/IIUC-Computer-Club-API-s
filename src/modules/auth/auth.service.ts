@@ -14,10 +14,8 @@ export const registerUser = async (
   password: string,
   gender: string,
 ) => {
-  console.log(id, name, email, gender, password);
-
   if (gender !== 'male' && gender !== 'female') {
-    throw new HTTPException(400, { message: "Invalid gender. Please specify 'male' or 'female'" });
+    throw new HTTPException(400, { message: "Please specify your gender as 'male' or 'female'" });
   }
   const existing = await db
     .select()
@@ -25,7 +23,7 @@ export const registerUser = async (
     .where(eq(sql`upper(${users.id})`, id.toUpperCase()));
 
   if (existing.length > 0) {
-    throw new HTTPException(409, { message: `user ${id} already exists` });
+    throw new HTTPException(409, { message: 'An account with this Student ID already exists' });
   }
 
   if (password.length < 6) {
@@ -70,6 +68,7 @@ export const loginUser = async (id: string, password: string) => {
     id: user.id,
     role: pos?.role ?? 'student',
     position: pos?.position ?? '',
+    gender: user.gender,
     mustChangePassword: user.mustChangePassword ?? false,
   });
 
@@ -102,6 +101,7 @@ export const refreshToken = async (c: Context) => {
     id: user.id,
     role: pos?.role ?? 'student',
     position: pos?.position ?? '',
+    gender: user.gender,
     mustChangePassword: user.mustChangePassword ?? false,
   });
 

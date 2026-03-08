@@ -9,7 +9,7 @@ import {
   vouchers,
 } from '../../db/event.schema';
 import { users, committee } from '../../db/schema';
-import { eq, desc, and, sql, count, sum } from 'drizzle-orm';
+import { eq, desc, and, or, sql, count, sum } from 'drizzle-orm';
 import { HTTPException } from 'hono/http-exception';
 import type { Context } from 'hono';
 import { hashPassword } from '../../utils/hash';
@@ -37,12 +37,19 @@ export const createEvent = async (
     sslcommerzEnabled?: boolean;
     customFields?: unknown;
     estimatedBudget?: number;
+    genderRestriction?: string;
   },
   c: Context,
 ) => {
   const user = c.get('user');
   if (!data.title || !data.committeeNumber || !data.eventDate) {
-    throw new HTTPException(400, { message: 'title, committeeNumber, and eventDate are required' });
+    throw new HTTPException(400, { message: 'Title, committee, and event date are required' });
+  }
+
+  // Validate gender restriction
+  const genderRestriction = data.genderRestriction ?? 'both';
+  if (!['male', 'female', 'both'].includes(genderRestriction)) {
+    throw new HTTPException(400, { message: 'Gender restriction must be male, female, or both' });
   }
 
   const [event] = await db
@@ -64,6 +71,7 @@ export const createEvent = async (
       customFields: data.customFields ?? null,
       createdBy: user.id,
       estimatedBudget: data.estimatedBudget ?? 0,
+      genderRestriction,
     })
     .returning();
 
@@ -93,6 +101,7 @@ export const listEvents = async (committeeNumber?: string, status?: string, gend
         customFields: events.customFields,
         createdBy: events.createdBy,
         estimatedBudget: events.estimatedBudget,
+        genderRestriction: events.genderRestriction,
         createdAt: events.createdAt,
       })
       .from(events)
@@ -100,7 +109,7 @@ export const listEvents = async (committeeNumber?: string, status?: string, gend
       .orderBy(desc(events.eventDate))
       .$dynamic();
 
-    const conditions = [eq(committee.gender, gender)];
+    const conditions = [or(eq(committee.gender, gender), eq(events.genderRestriction, 'both'))];
     if (committeeNumber) conditions.push(eq(events.committeeNumber, committeeNumber));
     if (status) conditions.push(eq(events.status, status));
     query = query.where(and(...conditions));
@@ -155,6 +164,7 @@ export const updateEvent = async (id: number, data: Record<string, unknown>) => 
     'sslcommerzEnabled',
     'customFields',
     'estimatedBudget',
+    'genderRestriction',
   ]);
 
   const updateData: Record<string, unknown> = {};
@@ -195,12 +205,27 @@ export const registerForEvent = async (
 ) => {
   const [event] = await db.select().from(events).where(eq(events.id, eventId));
   if (!event) throw new HTTPException(404, { message: 'Event not found' });
-  if (event.status === 'cancelled') throw new HTTPException(400, { message: 'Event is cancelled' });
+  if (event.status === 'cancelled')
+    throw new HTTPException(400, { message: 'This event has been cancelled' });
   if (event.status === 'completed')
-    throw new HTTPException(400, { message: 'Event has already completed' });
+    throw new HTTPException(400, { message: 'This event has already been completed' });
 
   if (event.registrationDeadline && new Date(event.registrationDeadline) < new Date()) {
     throw new HTTPException(400, { message: 'Registration deadline has passed' });
+  }
+
+  // Check gender restriction
+  if (event.genderRestriction && event.genderRestriction !== 'both') {
+    const [regUser] = await db
+      .select({ gender: users.gender })
+      .from(users)
+      .where(eq(users.id, userId));
+    if (regUser && regUser.gender !== event.genderRestriction) {
+      const allowed = event.genderRestriction === 'male' ? 'male' : 'female';
+      throw new HTTPException(403, {
+        message: `This event is restricted to ${allowed} students only`,
+      });
+    }
   }
 
   // Check max participants
@@ -210,7 +235,7 @@ export const registerForEvent = async (
       .from(eventRegistrations)
       .where(eq(eventRegistrations.eventId, eventId));
     if ((regCount?.count ?? 0) >= event.maxParticipants) {
-      throw new HTTPException(400, { message: 'Event is full' });
+      throw new HTTPException(400, { message: 'This event has reached maximum participants' });
     }
   }
 
@@ -219,7 +244,8 @@ export const registerForEvent = async (
     .select()
     .from(eventRegistrations)
     .where(and(eq(eventRegistrations.eventId, eventId), eq(eventRegistrations.userId, userId)));
-  if (existing) throw new HTTPException(409, { message: 'Already registered for this event' });
+  if (existing)
+    throw new HTTPException(409, { message: 'You are already registered for this event' });
 
   // For paid events with manual payment, require transaction ID
   if (event.isPaid && paymentMethod && paymentMethod !== 'sslcommerz' && !transactionId) {
@@ -279,17 +305,28 @@ export const guestRegisterForEvent = async (
 ) => {
   // Validate gender
   if (data.gender !== 'male' && data.gender !== 'female') {
-    throw new HTTPException(400, { message: "Invalid gender. Please specify 'male' or 'female'" });
+    throw new HTTPException(400, { message: "Please specify your gender as 'male' or 'female'" });
   }
 
   // Check if event exists and is open
   const [event] = await db.select().from(events).where(eq(events.id, eventId));
   if (!event) throw new HTTPException(404, { message: 'Event not found' });
-  if (event.status === 'cancelled') throw new HTTPException(400, { message: 'Event is cancelled' });
+  if (event.status === 'cancelled')
+    throw new HTTPException(400, { message: 'This event has been cancelled' });
   if (event.status === 'completed')
-    throw new HTTPException(400, { message: 'Event has already completed' });
+    throw new HTTPException(400, { message: 'This event has already been completed' });
   if (event.registrationDeadline && new Date(event.registrationDeadline) < new Date()) {
     throw new HTTPException(400, { message: 'Registration deadline has passed' });
+  }
+
+  // Check gender restriction
+  if (event.genderRestriction && event.genderRestriction !== 'both') {
+    if (data.gender !== event.genderRestriction) {
+      const allowed = event.genderRestriction === 'male' ? 'male' : 'female';
+      throw new HTTPException(403, {
+        message: `This event is restricted to ${allowed} students only`,
+      });
+    }
   }
 
   // Check max participants
@@ -299,7 +336,7 @@ export const guestRegisterForEvent = async (
       .from(eventRegistrations)
       .where(eq(eventRegistrations.eventId, eventId));
     if ((regCount?.count ?? 0) >= event.maxParticipants) {
-      throw new HTTPException(400, { message: 'Event is full' });
+      throw new HTTPException(400, { message: 'This event has reached maximum participants' });
     }
   }
 
@@ -416,7 +453,9 @@ export const submitPayment = async (
     throw new HTTPException(400, { message: 'This is a free event' });
 
   if (!paymentMethod || !transactionId) {
-    throw new HTTPException(400, { message: 'paymentMethod and transactionId are required' });
+    throw new HTTPException(400, {
+      message: 'Please select a payment method and enter your Transaction ID',
+    });
   }
 
   const [updated] = await db

@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { HTTPException } from 'hono/http-exception';
 import authRoutes from './modules/auth/auth.routes';
 import authorizationRoutes from './modules/authorization/authorization.routes';
 import userRoutes from './modules/user/user.routes';
@@ -53,5 +54,21 @@ app.route('/api/users', userRoutes);
 app.route('/api/authorization', authorizationRoutes);
 app.route('/api/committee', committeeRoutes);
 app.route('/api/events', eventRoutes);
+
+/**
+ * Global error handler — returns clean, user-friendly messages.
+ * Never exposes internal stack traces or sensitive details.
+ */
+app.onError((err, c) => {
+  if (err instanceof HTTPException) {
+    return c.json({ message: err.message }, err.status);
+  }
+
+  // Log the real error server-side for debugging
+  console.error('[Unhandled Error]', err);
+
+  // Return a generic message to the client
+  return c.json({ message: 'Something went wrong. Please try again later.' }, 500);
+});
 
 export default app;
