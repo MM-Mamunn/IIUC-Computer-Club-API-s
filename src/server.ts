@@ -5,4 +5,4 @@ Bun.serve({
   fetch: app.fetch,
 });
 
-console.log("Server running on http://localhost:3000");
+console.log("Server running on http://localhost:" + (Number(process.env.PORT) || 3000));
