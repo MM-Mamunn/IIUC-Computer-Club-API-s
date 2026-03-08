@@ -8,7 +8,7 @@ import {
   expenseClaims,
   vouchers,
 } from '../../db/event.schema';
-import { users } from '../../db/schema';
+import { users, committee } from '../../db/schema';
 import { eq, desc, and, sql, count, sum } from 'drizzle-orm';
 import { HTTPException } from 'hono/http-exception';
 import type { Context } from 'hono';
@@ -71,7 +71,43 @@ export const createEvent = async (
 };
 
 // ─── List Events ───
-export const listEvents = async (committeeNumber?: string, status?: string) => {
+export const listEvents = async (committeeNumber?: string, status?: string, gender?: string) => {
+  if (gender) {
+    // Join with committee table to filter by gender
+    let query = db
+      .select({
+        id: events.id,
+        title: events.title,
+        description: events.description,
+        committeeNumber: events.committeeNumber,
+        eventDate: events.eventDate,
+        registrationDeadline: events.registrationDeadline,
+        venue: events.venue,
+        isPaid: events.isPaid,
+        fee: events.fee,
+        maxParticipants: events.maxParticipants,
+        bannerImage: events.bannerImage,
+        status: events.status,
+        paymentNumbers: events.paymentNumbers,
+        sslcommerzEnabled: events.sslcommerzEnabled,
+        customFields: events.customFields,
+        createdBy: events.createdBy,
+        estimatedBudget: events.estimatedBudget,
+        createdAt: events.createdAt,
+      })
+      .from(events)
+      .innerJoin(committee, eq(events.committeeNumber, committee.number))
+      .orderBy(desc(events.eventDate))
+      .$dynamic();
+
+    const conditions = [eq(committee.gender, gender)];
+    if (committeeNumber) conditions.push(eq(events.committeeNumber, committeeNumber));
+    if (status) conditions.push(eq(events.status, status));
+    query = query.where(and(...conditions));
+
+    return query;
+  }
+
   let query = db.select().from(events).orderBy(desc(events.eventDate)).$dynamic();
 
   const conditions = [];

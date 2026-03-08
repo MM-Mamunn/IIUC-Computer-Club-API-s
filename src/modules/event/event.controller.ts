@@ -100,7 +100,8 @@ export const create = async (c: Context) => {
 export const list = async (c: Context) => {
   const committeeNumber = c.req.query('committee');
   const status = c.req.query('status');
-  const eventsList = await listEvents(committeeNumber, status);
+  const gender = c.req.query('gender');
+  const eventsList = await listEvents(committeeNumber, status, gender);
   return c.json({ events: eventsList }, 200);
 };
 
