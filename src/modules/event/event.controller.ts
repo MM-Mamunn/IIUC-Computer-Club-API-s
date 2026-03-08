@@ -37,6 +37,7 @@ import {
   regenerateVoucher,
   getEventVoucher,
   updateRegistrationResponses,
+  toggleFinancesLock,
 } from './event.service';
 import { uploadImageToCloudinary } from '../../utils/uploadImage';
 
@@ -62,6 +63,9 @@ export const create = async (c: Context) => {
       sslcommerzEnabled: formData.get('sslcommerzEnabled') === 'true',
       estimatedBudget: formData.get('estimatedBudget')
         ? Number(formData.get('estimatedBudget'))
+        : 0,
+      allocatedBudget: formData.get('allocatedBudget')
+        ? Number(formData.get('allocatedBudget'))
         : 0,
       genderRestriction: (formData.get('genderRestriction') as string) || 'both',
     };
@@ -146,7 +150,12 @@ export const update = async (c: Context) => {
         data[key] = value === 'true';
         continue;
       }
-      if (key === 'fee' || key === 'maxParticipants' || key === 'estimatedBudget') {
+      if (
+        key === 'fee' ||
+        key === 'maxParticipants' ||
+        key === 'estimatedBudget' ||
+        key === 'allocatedBudget'
+      ) {
         data[key] = value ? Number(value) : undefined;
         continue;
       }
@@ -550,4 +559,22 @@ export const getVoucherController = async (c: Context) => {
   const voucher = await getEventVoucher(id);
   if (!voucher) return c.json({ message: 'No voucher generated for this event yet' }, 404);
   return c.json({ voucher }, 200);
+};
+
+// ─── Lock / Unlock Finances ───
+
+export const toggleFinancesLockController = async (c: Context) => {
+  const id = parseInt(c.req.param('id'));
+  if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
+  const user = c.get('user');
+  const { lock } = await c.req.json();
+  if (typeof lock !== 'boolean') return c.json({ message: 'lock (boolean) is required' }, 400);
+
+  // Only president can unlock
+  if (!lock && user.role !== 'president') {
+    return c.json({ message: 'Only the president can unlock finances' }, 403);
+  }
+
+  const event = await toggleFinancesLock(id, user.id, lock);
+  return c.json({ event }, 200);
 };

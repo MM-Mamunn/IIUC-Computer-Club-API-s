@@ -41,6 +41,7 @@ import {
   regenerateVoucherController,
   getVoucherController,
   updateRegistrationResponsesController,
+  toggleFinancesLockController,
 } from './event.controller';
 import { initiateSslcommerzPayment, handleSslcommerzIpn } from './sslcommerz.service';
 import type { Context } from 'hono';
@@ -260,6 +261,14 @@ router.get(
   authMiddleware,
   requireRole(await getRolesByPriorityRange(1, 5)),
   getVoucherController,
+);
+
+// ─── Financial: Lock/Unlock (priority ≤ 2: president, VP, treasurer) ───
+router.put(
+  '/:id/finances-lock',
+  authMiddleware,
+  requireRole(await getRolesByPriorityRange(1, 2)),
+  toggleFinancesLockController,
 );
 
 export default router;

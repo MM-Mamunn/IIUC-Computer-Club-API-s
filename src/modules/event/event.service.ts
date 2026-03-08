@@ -37,6 +37,7 @@ export const createEvent = async (
     sslcommerzEnabled?: boolean;
     customFields?: unknown;
     estimatedBudget?: number;
+    allocatedBudget?: number;
     genderRestriction?: string;
   },
   c: Context,
@@ -71,6 +72,7 @@ export const createEvent = async (
       customFields: data.customFields ?? null,
       createdBy: user.id,
       estimatedBudget: data.estimatedBudget ?? 0,
+      allocatedBudget: data.allocatedBudget ?? 0,
       genderRestriction,
     })
     .returning();
@@ -164,6 +166,7 @@ export const updateEvent = async (id: number, data: Record<string, unknown>) => 
     'sslcommerzEnabled',
     'customFields',
     'estimatedBudget',
+    'allocatedBudget',
     'genderRestriction',
   ]);
 
@@ -868,6 +871,9 @@ export const addEventExpense = async (
 ) => {
   const [event] = await db.select().from(events).where(eq(events.id, eventId));
   if (!event) throw new HTTPException(404, { message: 'Event not found' });
+  if (event.financesLocked) {
+    throw new HTTPException(403, { message: 'Finances are locked for this event' });
+  }
   if (!data.description || !data.amount || data.amount <= 0) {
     throw new HTTPException(400, { message: 'description and a positive amount are required' });
   }
@@ -894,6 +900,14 @@ export const updateEventExpense = async (
   const [existing] = await db.select().from(eventExpenses).where(eq(eventExpenses.id, expenseId));
   if (!existing) throw new HTTPException(404, { message: 'Expense not found' });
 
+  // Check lock
+  const [evt] = await db
+    .select({ financesLocked: events.financesLocked })
+    .from(events)
+    .where(eq(events.id, existing.eventId));
+  if (evt?.financesLocked)
+    throw new HTTPException(403, { message: 'Finances are locked for this event' });
+
   const updateData: Record<string, unknown> = {};
   if (data.description !== undefined) updateData.description = data.description;
   if (data.amount !== undefined) {
@@ -918,6 +932,14 @@ export const updateEventExpense = async (
 export const deleteEventExpense = async (expenseId: number) => {
   const [existing] = await db.select().from(eventExpenses).where(eq(eventExpenses.id, expenseId));
   if (!existing) throw new HTTPException(404, { message: 'Expense not found' });
+
+  // Check lock
+  const [evt] = await db
+    .select({ financesLocked: events.financesLocked })
+    .from(events)
+    .where(eq(events.id, existing.eventId));
+  if (evt?.financesLocked)
+    throw new HTTPException(403, { message: 'Finances are locked for this event' });
 
   await db.delete(eventExpenses).where(eq(eventExpenses.id, expenseId));
   return { success: true, message: 'Expense deleted' };
@@ -951,6 +973,9 @@ export const submitExpenseClaim = async (
 ) => {
   const [event] = await db.select().from(events).where(eq(events.id, eventId));
   if (!event) throw new HTTPException(404, { message: 'Event not found' });
+  if (event.financesLocked) {
+    throw new HTTPException(403, { message: 'Finances are locked for this event' });
+  }
 
   // Verify user has a duty on this event
   const [duty] = await db
@@ -995,6 +1020,14 @@ export const reviewExpenseClaim = async (
     throw new HTTPException(400, { message: `Claim is already ${claim.status}` });
   }
 
+  // Check lock
+  const [evt] = await db
+    .select({ financesLocked: events.financesLocked })
+    .from(events)
+    .where(eq(events.id, claim.eventId));
+  if (evt?.financesLocked)
+    throw new HTTPException(403, { message: 'Finances are locked for this event' });
+
   const [updated] = await db
     .update(expenseClaims)
     .set({
@@ -1019,6 +1052,14 @@ export const markClaimPaid = async (
   if (claim.status !== 'approved') {
     throw new HTTPException(400, { message: 'Only approved claims can be marked as paid' });
   }
+
+  // Check lock
+  const [evtForPay] = await db
+    .select({ financesLocked: events.financesLocked })
+    .from(events)
+    .where(eq(events.id, claim.eventId));
+  if (evtForPay?.financesLocked)
+    throw new HTTPException(403, { message: 'Finances are locked for this event' });
 
   const [updated] = await db
     .update(expenseClaims)
@@ -1134,6 +1175,7 @@ export const getEventFinancials = async (eventId: number) => {
     eventTitle: event.title,
     committeeNumber: event.committeeNumber,
     estimatedBudget: event.estimatedBudget ?? 0,
+    allocatedBudget: event.allocatedBudget ?? 0,
     totalRevenue,
     totalExpense,
     clubSubsidy,
@@ -1142,6 +1184,9 @@ export const getEventFinancials = async (eventId: number) => {
     fee: event.fee ?? 0,
     pendingClaims: pendingResult?.count ?? 0,
     pendingClaimsAmount: Number(pendingResult?.total ?? 0),
+    financesLocked: event.financesLocked ?? false,
+    financesLockedBy: event.financesLockedBy ?? null,
+    financesLockedAt: event.financesLockedAt?.toISOString() ?? null,
   };
 };
 
@@ -1274,4 +1319,30 @@ export const getEventVoucher = async (eventId: number) => {
     .from(vouchers)
     .where(and(eq(vouchers.eventId, eventId), eq(vouchers.type, 'event_summary')));
   return voucher ?? null;
+};
+
+// ─── Lock / Unlock Event Finances ───
+
+export const toggleFinancesLock = async (eventId: number, userId: string, lock: boolean) => {
+  const [event] = await db.select().from(events).where(eq(events.id, eventId));
+  if (!event) throw new HTTPException(404, { message: 'Event not found' });
+
+  if (lock && event.financesLocked) {
+    throw new HTTPException(400, { message: 'Finances are already locked' });
+  }
+  if (!lock && !event.financesLocked) {
+    throw new HTTPException(400, { message: 'Finances are not locked' });
+  }
+
+  const [updated] = await db
+    .update(events)
+    .set({
+      financesLocked: lock,
+      financesLockedBy: lock ? userId : null,
+      financesLockedAt: lock ? new Date() : null,
+    })
+    .where(eq(events.id, eventId))
+    .returning();
+
+  return updated;
 };

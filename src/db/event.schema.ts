@@ -91,6 +91,21 @@ export const events = pgTable('events', {
   /** Estimated budget for putting on this event */
   estimatedBudget: doublePrecision('estimated_budget').default(0),
 
+  /** Actual budget allocated/received from authority */
+  allocatedBudget: doublePrecision('allocated_budget').default(0),
+
+  /** Whether finances for this event are locked (no more edits) */
+  financesLocked: boolean('finances_locked').notNull().default(false),
+
+  /** Who locked the finances */
+  financesLockedBy: varchar('finances_locked_by', { length: 255 }).references(() => users.id, {
+    onDelete: 'set null',
+    onUpdate: 'cascade',
+  }),
+
+  /** When the finances were locked */
+  financesLockedAt: timestamp('finances_locked_at', { withTimezone: true }),
+
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 
