@@ -36,6 +36,7 @@ import {
   generateVoucher,
   regenerateVoucher,
   getEventVoucher,
+  updateRegistrationResponses,
 } from './event.service';
 import { uploadImageToCloudinary } from '../../utils/uploadImage';
 
@@ -201,6 +202,19 @@ export const registrations = async (c: Context) => {
   return c.json({ registrations: regs }, 200);
 };
 
+export const updateRegistrationResponsesController = async (c: Context) => {
+  const id = parseInt(c.req.param('id'));
+  if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
+  const userId = c.req.param('userId');
+  if (!userId) return c.json({ message: 'userId is required' }, 400);
+  const { customFieldResponses } = await c.req.json();
+  if (!customFieldResponses || typeof customFieldResponses !== 'object') {
+    return c.json({ message: 'customFieldResponses is required' }, 400);
+  }
+  const result = await updateRegistrationResponses(id, userId, customFieldResponses);
+  return c.json({ registration: result }, 200);
+};
+
 export const submitPaymentController = async (c: Context) => {
   const id = parseInt(c.req.param('id'));
   if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
@@ -337,6 +351,22 @@ export const managedEventRegistrations = async (c: Context) => {
   if (!allowed) return c.json({ message: 'You are not a manager for this event' }, 403);
   const regs = await getEventRegistrations(id);
   return c.json({ registrations: regs }, 200);
+};
+
+export const managedUpdateRegistrationResponsesController = async (c: Context) => {
+  const id = parseInt(c.req.param('id'));
+  if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
+  const userId = c.req.param('userId');
+  if (!userId) return c.json({ message: 'userId is required' }, 400);
+  const user = c.get('user');
+  const allowed = await isEventManager(id, user.id);
+  if (!allowed) return c.json({ message: 'You are not a manager for this event' }, 403);
+  const { customFieldResponses } = await c.req.json();
+  if (!customFieldResponses || typeof customFieldResponses !== 'object') {
+    return c.json({ message: 'customFieldResponses is required' }, 400);
+  }
+  const result = await updateRegistrationResponses(id, userId, customFieldResponses);
+  return c.json({ registration: result }, 200);
 };
 
 // ══════════════════════════════════════════════

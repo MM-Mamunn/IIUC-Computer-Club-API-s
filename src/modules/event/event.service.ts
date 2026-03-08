@@ -626,6 +626,27 @@ export const getEventRegistrations = async (eventId: number) => {
   return registrations;
 };
 
+// ─── Update Registration Responses (admin / manager) ───
+export const updateRegistrationResponses = async (
+  eventId: number,
+  userId: string,
+  customFieldResponses: Record<string, unknown>,
+) => {
+  const [existing] = await db
+    .select()
+    .from(eventRegistrations)
+    .where(and(eq(eventRegistrations.eventId, eventId), eq(eventRegistrations.userId, userId)));
+  if (!existing) throw new HTTPException(404, { message: 'Registration not found' });
+
+  const [updated] = await db
+    .update(eventRegistrations)
+    .set({ customFieldResponses })
+    .where(and(eq(eventRegistrations.eventId, eventId), eq(eventRegistrations.userId, userId)))
+    .returning();
+
+  return updated;
+};
+
 // ─── Assign Duty ───
 export const assignDuty = async (
   eventId: number,

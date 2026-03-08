@@ -26,6 +26,7 @@ import {
   managersController,
   myManagedEventsController,
   managedEventRegistrations,
+  managedUpdateRegistrationResponsesController,
   addExpenseController,
   updateExpenseController,
   deleteExpenseController,
@@ -39,6 +40,7 @@ import {
   generateVoucherController,
   regenerateVoucherController,
   getVoucherController,
+  updateRegistrationResponsesController,
 } from './event.controller';
 import { initiateSslcommerzPayment, handleSslcommerzIpn } from './sslcommerz.service';
 import type { Context } from 'hono';
@@ -133,6 +135,14 @@ router.put(
   verifyPaymentController,
 );
 
+// ─── Update registration responses (executive only, priority ≤ 4) ───
+router.put(
+  '/:id/registrations/:userId/responses',
+  authMiddleware,
+  requireRole(await getRolesByPriorityRange(1, 4)),
+  updateRegistrationResponsesController,
+);
+
 // ─── Duty management (priority ≤ 3) ───
 router.post(
   '/:id/duties',
@@ -153,6 +163,11 @@ router.get('/:id/duties', authMiddleware, duties);
 // ─── Event Manager delegation ───
 router.get('/me/managed-events', authMiddleware, myManagedEventsController);
 router.get('/:id/managed-registrations', authMiddleware, managedEventRegistrations);
+router.put(
+  '/:id/managed-registrations/:userId/responses',
+  authMiddleware,
+  managedUpdateRegistrationResponsesController,
+);
 
 router.post(
   '/:id/managers',
