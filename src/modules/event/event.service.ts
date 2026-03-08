@@ -9,7 +9,7 @@ import {
   vouchers,
 } from '../../db/event.schema';
 import { users, committee } from '../../db/schema';
-import { eq, desc, and, or, sql, count, sum } from 'drizzle-orm';
+import { eq, desc, and, or, count, sum } from 'drizzle-orm';
 import { HTTPException } from 'hono/http-exception';
 import type { Context } from 'hono';
 import { hashPassword } from '../../utils/hash';
@@ -343,14 +343,11 @@ export const guestRegisterForEvent = async (
     }
   }
 
-  const studentId = data.studentId.trim();
+  const studentId = data.studentId.trim().toUpperCase();
   const email = data.email.trim().toLowerCase();
 
   // Check if user already exists
-  const [existingUser] = await db
-    .select()
-    .from(users)
-    .where(eq(sql`upper(${users.id})`, studentId.toUpperCase()));
+  const [existingUser] = await db.select().from(users).where(eq(users.id, studentId));
 
   if (existingUser) {
     throw new HTTPException(409, {

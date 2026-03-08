@@ -39,7 +39,7 @@ export const getUserById = async (id: string) => {
       createdAt: users.createdAt,
     })
     .from(users)
-    .where(eq(users.id, id));
+    .where(eq(users.id, id.toUpperCase()));
 
   return user ?? null;
 };

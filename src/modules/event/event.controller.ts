@@ -214,7 +214,7 @@ export const registrations = async (c: Context) => {
 export const updateRegistrationResponsesController = async (c: Context) => {
   const id = parseInt(c.req.param('id'));
   if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
-  const userId = c.req.param('userId');
+  const userId = c.req.param('userId')?.toUpperCase();
   if (!userId) return c.json({ message: 'userId is required' }, 400);
   const { customFieldResponses } = await c.req.json();
   if (!customFieldResponses || typeof customFieldResponses !== 'object') {
@@ -238,7 +238,7 @@ export const verifyPaymentController = async (c: Context) => {
   if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
   const { userId, verified } = await c.req.json();
   if (!userId) return c.json({ message: 'userId is required' }, 400);
-  const result = await verifyPayment(id, userId, verified !== false);
+  const result = await verifyPayment(id, userId.toUpperCase(), verified !== false);
   return c.json({ registration: result }, 200);
 };
 
@@ -264,7 +264,7 @@ export const assignDutyController = async (c: Context) => {
   if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
   const { userId, duty, description } = await c.req.json();
   if (!userId || !duty) return c.json({ message: 'userId and duty are required' }, 400);
-  const dutyRecord = await assignDuty(id, userId, duty, description ?? null, c);
+  const dutyRecord = await assignDuty(id, userId.toUpperCase(), duty, description ?? null, c);
   return c.json({ duty: dutyRecord }, 201);
 };
 
@@ -273,7 +273,7 @@ export const removeDutyController = async (c: Context) => {
   if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
   const { userId, duty } = await c.req.json();
   if (!userId || !duty) return c.json({ message: 'userId and duty are required' }, 400);
-  const result = await removeDuty(id, userId, duty);
+  const result = await removeDuty(id, userId.toUpperCase(), duty);
   return c.json(result, 200);
 };
 
@@ -326,7 +326,7 @@ export const addManagerController = async (c: Context) => {
   const { userId } = await c.req.json();
   if (!userId) return c.json({ message: 'userId is required' }, 400);
   const user = c.get('user');
-  const manager = await addEventManager(id, userId, user.id);
+  const manager = await addEventManager(id, userId.toUpperCase(), user.id);
   return c.json({ manager }, 201);
 };
 
@@ -335,7 +335,7 @@ export const removeManagerController = async (c: Context) => {
   if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
   const { userId } = await c.req.json();
   if (!userId) return c.json({ message: 'userId is required' }, 400);
-  const result = await removeEventManager(id, userId);
+  const result = await removeEventManager(id, userId.toUpperCase());
   return c.json(result, 200);
 };
 
@@ -365,7 +365,7 @@ export const managedEventRegistrations = async (c: Context) => {
 export const managedUpdateRegistrationResponsesController = async (c: Context) => {
   const id = parseInt(c.req.param('id'));
   if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
-  const userId = c.req.param('userId');
+  const userId = c.req.param('userId')?.toUpperCase();
   if (!userId) return c.json({ message: 'userId is required' }, 400);
   const user = c.get('user');
   const allowed = await isEventManager(id, user.id);

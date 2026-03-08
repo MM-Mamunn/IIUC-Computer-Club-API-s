@@ -1,6 +1,6 @@
 import { db } from '../../config/db';
 import { executives, users } from '../../db/schema';
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { hashPassword, comparePassword } from '../../utils/hash';
 import { generateToken } from '../../utils/jwt';
 import { HTTPException } from 'hono/http-exception';
@@ -14,13 +14,11 @@ export const registerUser = async (
   password: string,
   gender: string,
 ) => {
+  id = id.toUpperCase();
   if (gender !== 'male' && gender !== 'female') {
     throw new HTTPException(400, { message: "Please specify your gender as 'male' or 'female'" });
   }
-  const existing = await db
-    .select()
-    .from(users)
-    .where(eq(sql`upper(${users.id})`, id.toUpperCase()));
+  const existing = await db.select().from(users).where(eq(users.id, id));
 
   if (existing.length > 0) {
     throw new HTTPException(409, { message: 'An account with this Student ID already exists' });
@@ -45,6 +43,7 @@ export const registerUser = async (
   return { token };
 };
 export const loginUser = async (id: string, password: string) => {
+  id = id.toUpperCase();
   const [user] = await db.select().from(users).where(eq(users.id, id));
 
   if (!user) {
