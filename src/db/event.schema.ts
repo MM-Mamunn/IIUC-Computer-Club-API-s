@@ -10,6 +10,7 @@ import {
   primaryKey,
   serial,
   jsonb,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import { users, committee } from './schema';
 
@@ -78,6 +79,9 @@ export const events = pgTable('events', {
       onDelete: 'set null',
       onUpdate: 'cascade',
     }),
+
+  /** Estimated budget for putting on this event */
+  estimatedBudget: doublePrecision('estimated_budget').default(0),
 
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
@@ -205,3 +209,124 @@ export const eventManagers = pgTable(
     pk: primaryKey({ columns: [table.eventId, table.userId] }),
   }),
 );
+
+/* =========================
+   EVENT EXPENSES TABLE
+   (track expenses incurred for an event)
+========================= */
+export const eventExpenses = pgTable('event_expenses', {
+  id: serial('id').primaryKey(),
+
+  eventId: integer('event_id')
+    .notNull()
+    .references(() => events.id, { onDelete: 'cascade', onUpdate: 'cascade' }),
+
+  /** What was purchased / cost description */
+  description: varchar('description', { length: 1000 }).notNull(),
+
+  /** Amount spent (BDT) */
+  amount: doublePrecision('amount').notNull(),
+
+  /** Category: venue, logistics, food, printing, prizes, decoration, other */
+  category: varchar('category', { length: 100 }).notNull().default('other'),
+
+  /** Receipt image URL (Cloudinary) */
+  receiptImage: text('receipt_image'),
+
+  /** Who logged this expense */
+  submittedBy: varchar('submitted_by', { length: 255 })
+    .notNull()
+    .references(() => users.id, { onDelete: 'set null', onUpdate: 'cascade' }),
+
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
+
+/* =========================
+   EXPENSE CLAIMS TABLE
+   (members claim reimbursement for purchases made on behalf of club)
+========================= */
+export const expenseClaims = pgTable('expense_claims', {
+  id: serial('id').primaryKey(),
+
+  eventId: integer('event_id')
+    .notNull()
+    .references(() => events.id, { onDelete: 'cascade', onUpdate: 'cascade' }),
+
+  /** Who is claiming reimbursement */
+  userId: varchar('user_id', { length: 255 })
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade', onUpdate: 'cascade' }),
+
+  /** What was purchased */
+  description: varchar('description', { length: 1000 }).notNull(),
+
+  /** Amount to reimburse (BDT) */
+  amount: doublePrecision('amount').notNull(),
+
+  /** Proof image URL (receipt/voucher photo) */
+  proofImage: text('proof_image').notNull(),
+
+  /** pending → approved → paid   OR   pending → rejected */
+  status: varchar('status', { length: 20 }).notNull().default('pending'),
+
+  submittedAt: timestamp('submitted_at', { withTimezone: true }).defaultNow(),
+
+  /** Who reviewed (approved/rejected) this claim */
+  reviewedBy: varchar('reviewed_by', { length: 255 }).references(() => users.id, {
+    onDelete: 'set null',
+    onUpdate: 'cascade',
+  }),
+
+  reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+
+  /** Optional reviewer notes */
+  notes: text('notes'),
+
+  /** Who marked this as paid */
+  paidBy: varchar('paid_by', { length: 255 }).references(() => users.id, {
+    onDelete: 'set null',
+    onUpdate: 'cascade',
+  }),
+
+  paidAt: timestamp('paid_at', { withTimezone: true }),
+});
+
+/* =========================
+   VOUCHERS TABLE
+   (financial summary voucher for an event — for records & printing)
+========================= */
+export const vouchers = pgTable('vouchers', {
+  id: serial('id').primaryKey(),
+
+  eventId: integer('event_id')
+    .notNull()
+    .references(() => events.id, { onDelete: 'cascade', onUpdate: 'cascade' }),
+
+  /** Unique human-readable voucher number: e.g. IIUC-CC-2026-001 */
+  voucherNumber: varchar('voucher_number', { length: 100 }).notNull().unique(),
+
+  /** event_summary | expense_reimbursement */
+  type: varchar('type', { length: 30 }).notNull().default('event_summary'),
+
+  /** Revenue from paid registrations */
+  totalRevenue: doublePrecision('total_revenue').notNull().default(0),
+
+  /** Total expenses for the event */
+  totalExpense: doublePrecision('total_expense').notNull().default(0),
+
+  /** Club subsidy = max(0, totalExpense - totalRevenue) */
+  clubSubsidy: doublePrecision('club_subsidy').notNull().default(0),
+
+  /** Net amount = totalRevenue - totalExpense (negative = club subsidized) */
+  netAmount: doublePrecision('net_amount').notNull().default(0),
+
+  /** Full breakdown stored as JSON for PDF generation */
+  data: jsonb('data'),
+
+  /** Who generated this voucher */
+  generatedBy: varchar('generated_by', { length: 255 })
+    .notNull()
+    .references(() => users.id, { onDelete: 'set null', onUpdate: 'cascade' }),
+
+  generatedAt: timestamp('generated_at', { withTimezone: true }).defaultNow(),
+});

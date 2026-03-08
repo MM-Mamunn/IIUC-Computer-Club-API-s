@@ -100,6 +100,7 @@ export const showActive = async () => {
       start: committee.start,
       end: committee.end,
       description: committee.description,
+      beginningBudget: committee.beginningBudget,
     })
     .from(committee)
     .where(isNull(committee.end));

@@ -26,6 +26,18 @@ import {
   managersController,
   myManagedEventsController,
   managedEventRegistrations,
+  addExpenseController,
+  updateExpenseController,
+  deleteExpenseController,
+  listExpensesController,
+  submitClaimController,
+  reviewClaimController,
+  markClaimPaidController,
+  listClaimsController,
+  myClaimsController,
+  financialsController,
+  generateVoucherController,
+  getVoucherController,
 } from './event.controller';
 import { initiateSslcommerzPayment, handleSslcommerzIpn } from './sslcommerz.service';
 import type { Context } from 'hono';
@@ -158,6 +170,74 @@ router.get(
   authMiddleware,
   requireRole(await getRolesByPriorityRange(1, 4)),
   managersController,
+);
+
+// ─── Financial: Expenses ───
+router.get(
+  '/:id/expenses',
+  authMiddleware,
+  requireRole(await getRolesByPriorityRange(1, 5)),
+  listExpensesController,
+);
+router.post(
+  '/:id/expenses',
+  authMiddleware,
+  requireRole(await getRolesByPriorityRange(1, 4)),
+  addExpenseController,
+);
+router.put(
+  '/:id/expenses/:expenseId',
+  authMiddleware,
+  requireRole(await getRolesByPriorityRange(1, 4)),
+  updateExpenseController,
+);
+router.delete(
+  '/:id/expenses/:expenseId',
+  authMiddleware,
+  requireRole(await getRolesByPriorityRange(1, 4)),
+  deleteExpenseController,
+);
+
+// ─── Financial: Expense Claims ───
+router.get('/me/claims', authMiddleware, myClaimsController);
+router.post('/:id/claims', authMiddleware, submitClaimController);
+router.get(
+  '/:id/claims',
+  authMiddleware,
+  requireRole(await getRolesByPriorityRange(1, 5)),
+  listClaimsController,
+);
+router.put(
+  '/:id/claims/:claimId/review',
+  authMiddleware,
+  requireRole(await getRolesByPriorityRange(1, 5)),
+  reviewClaimController,
+);
+router.put(
+  '/:id/claims/:claimId/pay',
+  authMiddleware,
+  requireRole(await getRolesByPriorityRange(1, 2)),
+  markClaimPaidController,
+);
+
+// ─── Financial: Financials & Voucher ───
+router.get(
+  '/:id/financials',
+  authMiddleware,
+  requireRole(await getRolesByPriorityRange(1, 5)),
+  financialsController,
+);
+router.post(
+  '/:id/voucher',
+  authMiddleware,
+  requireRole(await getRolesByPriorityRange(1, 5)),
+  generateVoucherController,
+);
+router.get(
+  '/:id/voucher',
+  authMiddleware,
+  requireRole(await getRolesByPriorityRange(1, 5)),
+  getVoucherController,
 );
 
 export default router;

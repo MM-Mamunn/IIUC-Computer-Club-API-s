@@ -1,7 +1,15 @@
 import { db } from '../../config/db';
-import { events, eventRegistrations, eventDuties, eventManagers } from '../../db/event.schema';
+import {
+  events,
+  eventRegistrations,
+  eventDuties,
+  eventManagers,
+  eventExpenses,
+  expenseClaims,
+  vouchers,
+} from '../../db/event.schema';
 import { users } from '../../db/schema';
-import { eq, desc, and, sql, count } from 'drizzle-orm';
+import { eq, desc, and, sql, count, sum } from 'drizzle-orm';
 import { HTTPException } from 'hono/http-exception';
 import type { Context } from 'hono';
 import { hashPassword } from '../../utils/hash';
@@ -27,6 +35,7 @@ export const createEvent = async (
     paymentNumbers?: { bkash?: string[]; nagad?: string[] };
     sslcommerzEnabled?: boolean;
     customFields?: unknown;
+    estimatedBudget?: number;
   },
   c: Context,
 ) => {
@@ -53,6 +62,7 @@ export const createEvent = async (
       sslcommerzEnabled: data.sslcommerzEnabled ?? false,
       customFields: data.customFields ?? null,
       createdBy: user.id,
+      estimatedBudget: data.estimatedBudget ?? 0,
     })
     .returning();
 
@@ -107,6 +117,7 @@ export const updateEvent = async (id: number, data: Record<string, unknown>) => 
     'paymentNumbers',
     'sslcommerzEnabled',
     'customFields',
+    'estimatedBudget',
   ]);
 
   const updateData: Record<string, unknown> = {};
@@ -715,4 +726,366 @@ export const getMyManagedEvents = async (userId: string) => {
     .where(eq(eventManagers.userId, userId))
     .orderBy(desc(events.eventDate));
   return rows;
+};
+
+// ══════════════════════════════════════════════
+// FINANCIAL: Expenses, Claims, Vouchers
+// ══════════════════════════════════════════════
+
+// ─── Event Expenses ───
+
+export const addEventExpense = async (
+  eventId: number,
+  data: { description: string; amount: number; category?: string; receiptImage?: string },
+  userId: string,
+) => {
+  const [event] = await db.select().from(events).where(eq(events.id, eventId));
+  if (!event) throw new HTTPException(404, { message: 'Event not found' });
+  if (!data.description || !data.amount || data.amount <= 0) {
+    throw new HTTPException(400, { message: 'description and a positive amount are required' });
+  }
+
+  const [expense] = await db
+    .insert(eventExpenses)
+    .values({
+      eventId,
+      description: data.description,
+      amount: data.amount,
+      category: data.category ?? 'other',
+      receiptImage: data.receiptImage ?? null,
+      submittedBy: userId,
+    })
+    .returning();
+
+  return expense;
+};
+
+export const updateEventExpense = async (
+  expenseId: number,
+  data: { description?: string; amount?: number; category?: string; receiptImage?: string },
+) => {
+  const [existing] = await db.select().from(eventExpenses).where(eq(eventExpenses.id, expenseId));
+  if (!existing) throw new HTTPException(404, { message: 'Expense not found' });
+
+  const updateData: Record<string, unknown> = {};
+  if (data.description !== undefined) updateData.description = data.description;
+  if (data.amount !== undefined) {
+    if (data.amount <= 0) throw new HTTPException(400, { message: 'amount must be positive' });
+    updateData.amount = data.amount;
+  }
+  if (data.category !== undefined) updateData.category = data.category;
+  if (data.receiptImage !== undefined) updateData.receiptImage = data.receiptImage;
+
+  if (Object.keys(updateData).length === 0) {
+    throw new HTTPException(400, { message: 'No fields to update' });
+  }
+
+  const [updated] = await db
+    .update(eventExpenses)
+    .set(updateData)
+    .where(eq(eventExpenses.id, expenseId))
+    .returning();
+  return updated;
+};
+
+export const deleteEventExpense = async (expenseId: number) => {
+  const [existing] = await db.select().from(eventExpenses).where(eq(eventExpenses.id, expenseId));
+  if (!existing) throw new HTTPException(404, { message: 'Expense not found' });
+
+  await db.delete(eventExpenses).where(eq(eventExpenses.id, expenseId));
+  return { success: true, message: 'Expense deleted' };
+};
+
+export const getEventExpenses = async (eventId: number) => {
+  return db
+    .select({
+      id: eventExpenses.id,
+      eventId: eventExpenses.eventId,
+      description: eventExpenses.description,
+      amount: eventExpenses.amount,
+      category: eventExpenses.category,
+      receiptImage: eventExpenses.receiptImage,
+      submittedBy: eventExpenses.submittedBy,
+      submitterName: users.name,
+      createdAt: eventExpenses.createdAt,
+    })
+    .from(eventExpenses)
+    .leftJoin(users, eq(eventExpenses.submittedBy, users.id))
+    .where(eq(eventExpenses.eventId, eventId))
+    .orderBy(desc(eventExpenses.createdAt));
+};
+
+// ─── Expense Claims ───
+
+export const submitExpenseClaim = async (
+  eventId: number,
+  userId: string,
+  data: { description: string; amount: number; proofImage: string },
+) => {
+  const [event] = await db.select().from(events).where(eq(events.id, eventId));
+  if (!event) throw new HTTPException(404, { message: 'Event not found' });
+
+  // Verify user has a duty on this event
+  const [duty] = await db
+    .select()
+    .from(eventDuties)
+    .where(and(eq(eventDuties.eventId, eventId), eq(eventDuties.userId, userId)));
+  if (!duty) {
+    throw new HTTPException(403, {
+      message: 'Only duty-assigned members can submit expense claims for this event',
+    });
+  }
+
+  if (!data.description || !data.amount || data.amount <= 0 || !data.proofImage) {
+    throw new HTTPException(400, {
+      message: 'description, a positive amount, and proofImage are required',
+    });
+  }
+
+  const [claim] = await db
+    .insert(expenseClaims)
+    .values({
+      eventId,
+      userId,
+      description: data.description,
+      amount: data.amount,
+      proofImage: data.proofImage,
+    })
+    .returning();
+
+  return claim;
+};
+
+export const reviewExpenseClaim = async (
+  claimId: number,
+  reviewerId: string,
+  approved: boolean,
+  notes?: string,
+) => {
+  const [claim] = await db.select().from(expenseClaims).where(eq(expenseClaims.id, claimId));
+  if (!claim) throw new HTTPException(404, { message: 'Claim not found' });
+  if (claim.status !== 'pending') {
+    throw new HTTPException(400, { message: `Claim is already ${claim.status}` });
+  }
+
+  const [updated] = await db
+    .update(expenseClaims)
+    .set({
+      status: approved ? 'approved' : 'rejected',
+      reviewedBy: reviewerId,
+      reviewedAt: new Date(),
+      notes: notes ?? null,
+    })
+    .where(eq(expenseClaims.id, claimId))
+    .returning();
+
+  return updated;
+};
+
+export const markClaimPaid = async (claimId: number, paidByUserId: string) => {
+  const [claim] = await db.select().from(expenseClaims).where(eq(expenseClaims.id, claimId));
+  if (!claim) throw new HTTPException(404, { message: 'Claim not found' });
+  if (claim.status !== 'approved') {
+    throw new HTTPException(400, { message: 'Only approved claims can be marked as paid' });
+  }
+
+  const [updated] = await db
+    .update(expenseClaims)
+    .set({
+      status: 'paid',
+      paidBy: paidByUserId,
+      paidAt: new Date(),
+    })
+    .where(eq(expenseClaims.id, claimId))
+    .returning();
+
+  // Auto-create a corresponding expense record for the paid claim
+  await db.insert(eventExpenses).values({
+    eventId: claim.eventId,
+    description: `[Reimbursement] ${claim.description}`,
+    amount: claim.amount,
+    category: 'reimbursement',
+    receiptImage: claim.proofImage,
+    submittedBy: claim.userId,
+  });
+
+  return updated;
+};
+
+export const getEventClaims = async (eventId: number) => {
+  const claimerAlias = users;
+  return db
+    .select({
+      id: expenseClaims.id,
+      eventId: expenseClaims.eventId,
+      userId: expenseClaims.userId,
+      userName: claimerAlias.name,
+      description: expenseClaims.description,
+      amount: expenseClaims.amount,
+      proofImage: expenseClaims.proofImage,
+      status: expenseClaims.status,
+      submittedAt: expenseClaims.submittedAt,
+      reviewedBy: expenseClaims.reviewedBy,
+      reviewedAt: expenseClaims.reviewedAt,
+      notes: expenseClaims.notes,
+      paidBy: expenseClaims.paidBy,
+      paidAt: expenseClaims.paidAt,
+    })
+    .from(expenseClaims)
+    .leftJoin(claimerAlias, eq(expenseClaims.userId, claimerAlias.id))
+    .where(eq(expenseClaims.eventId, eventId))
+    .orderBy(desc(expenseClaims.submittedAt));
+};
+
+export const getMyClaims = async (userId: string) => {
+  return db
+    .select({
+      id: expenseClaims.id,
+      eventId: expenseClaims.eventId,
+      eventTitle: events.title,
+      description: expenseClaims.description,
+      amount: expenseClaims.amount,
+      proofImage: expenseClaims.proofImage,
+      status: expenseClaims.status,
+      submittedAt: expenseClaims.submittedAt,
+      notes: expenseClaims.notes,
+      paidAt: expenseClaims.paidAt,
+    })
+    .from(expenseClaims)
+    .innerJoin(events, eq(expenseClaims.eventId, events.id))
+    .where(eq(expenseClaims.userId, userId))
+    .orderBy(desc(expenseClaims.submittedAt));
+};
+
+// ─── Event Financials (server-side calculation) ───
+
+export const getEventFinancials = async (eventId: number) => {
+  const [event] = await db.select().from(events).where(eq(events.id, eventId));
+  if (!event) throw new HTTPException(404, { message: 'Event not found' });
+
+  // Revenue: count of verified paid registrations × fee
+  const [revenueResult] = await db
+    .select({ count: count() })
+    .from(eventRegistrations)
+    .where(
+      and(
+        eq(eventRegistrations.eventId, eventId),
+        eq(eventRegistrations.paymentStatus, 'verified'),
+      ),
+    );
+  const verifiedCount = revenueResult?.count ?? 0;
+  const totalRevenue = event.isPaid ? verifiedCount * (event.fee ?? 0) : 0;
+
+  // Expenses: sum of all event expenses
+  const [expenseResult] = await db
+    .select({ total: sum(eventExpenses.amount) })
+    .from(eventExpenses)
+    .where(eq(eventExpenses.eventId, eventId));
+  const totalExpense = Number(expenseResult?.total ?? 0);
+
+  // Club subsidy = how much the club had to put in from its own budget
+  const clubSubsidy = Math.max(0, totalExpense - totalRevenue);
+
+  // Net = revenue - expense (negative means club subsidized)
+  const netAmount = totalRevenue - totalExpense;
+
+  // Pending claims
+  const [pendingResult] = await db
+    .select({ count: count(), total: sum(expenseClaims.amount) })
+    .from(expenseClaims)
+    .where(and(eq(expenseClaims.eventId, eventId), eq(expenseClaims.status, 'pending')));
+
+  return {
+    eventId,
+    eventTitle: event.title,
+    committeeNumber: event.committeeNumber,
+    estimatedBudget: event.estimatedBudget ?? 0,
+    totalRevenue,
+    totalExpense,
+    clubSubsidy,
+    netAmount,
+    verifiedRegistrations: verifiedCount,
+    fee: event.fee ?? 0,
+    pendingClaims: pendingResult?.count ?? 0,
+    pendingClaimsAmount: Number(pendingResult?.total ?? 0),
+  };
+};
+
+// ─── Voucher Generation ───
+
+export const generateVoucher = async (eventId: number, userId: string) => {
+  const [event] = await db.select().from(events).where(eq(events.id, eventId));
+  if (!event) throw new HTTPException(404, { message: 'Event not found' });
+
+  // Check if voucher already exists for this event
+  const [existing] = await db
+    .select()
+    .from(vouchers)
+    .where(and(eq(vouchers.eventId, eventId), eq(vouchers.type, 'event_summary')));
+  if (existing) {
+    throw new HTTPException(409, {
+      message: 'A voucher has already been generated for this event',
+    });
+  }
+
+  // Calculate financials
+  const financials = await getEventFinancials(eventId);
+
+  // Get expense breakdown
+  const expenseList = await getEventExpenses(eventId);
+
+  // Get claim summary
+  const claimList = await getEventClaims(eventId);
+
+  // Generate voucher number: IIUC-CC-{YEAR}-{sequential}
+  const year = new Date().getFullYear();
+  const [countResult] = await db.select({ count: count() }).from(vouchers);
+  const seq = (countResult?.count ?? 0) + 1;
+  const voucherNumber = `IIUC-CC-${year}-${String(seq).padStart(4, '0')}`;
+
+  const [voucher] = await db
+    .insert(vouchers)
+    .values({
+      eventId,
+      voucherNumber,
+      type: 'event_summary',
+      totalRevenue: financials.totalRevenue,
+      totalExpense: financials.totalExpense,
+      clubSubsidy: financials.clubSubsidy,
+      netAmount: financials.netAmount,
+      data: {
+        event: {
+          id: event.id,
+          title: event.title,
+          committeeNumber: event.committeeNumber,
+          eventDate: event.eventDate,
+          venue: event.venue,
+          isPaid: event.isPaid,
+          fee: event.fee,
+          estimatedBudget: event.estimatedBudget,
+        },
+        financials,
+        expenses: expenseList,
+        claims: claimList.map((c) => ({
+          id: c.id,
+          userName: c.userName,
+          description: c.description,
+          amount: c.amount,
+          status: c.status,
+        })),
+        generatedAt: new Date().toISOString(),
+      },
+      generatedBy: userId,
+    })
+    .returning();
+
+  return voucher;
+};
+
+export const getEventVoucher = async (eventId: number) => {
+  const [voucher] = await db
+    .select()
+    .from(vouchers)
+    .where(and(eq(vouchers.eventId, eventId), eq(vouchers.type, 'event_summary')));
+  return voucher ?? null;
 };

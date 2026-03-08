@@ -1,7 +1,7 @@
 import { db } from '../../config/db';
 import { users, executives, committee } from '../../db/schema';
-import { events, eventRegistrations } from '../../db/event.schema';
-import { eq, ilike, or, count, isNull, sql } from 'drizzle-orm';
+import { events, eventRegistrations, eventExpenses, vouchers } from '../../db/event.schema';
+import { eq, ilike, or, count, isNull, sql, sum } from 'drizzle-orm';
 
 // ─── Search Users ───
 export const searchUsers = async (query: string) => {
@@ -61,5 +61,53 @@ export const getDashboardStats = async () => {
     totalEvents: eventCount?.count ?? 0,
     totalExecutives: executiveCount?.count ?? 0,
     totalRegistrations: registrationCount?.count ?? 0,
+  };
+};
+
+// ─── Budget Overview Stats (president/treasurer) ───
+export const getBudgetStats = async () => {
+  // Total beginning budget across all active committees
+  const [budgetResult] = await db
+    .select({ total: sum(committee.beginningBudget) })
+    .from(committee)
+    .where(isNull(committee.end));
+  const totalBudget = Number(budgetResult?.total ?? 0);
+
+  // Total expenses across all events
+  const [expenseResult] = await db.select({ total: sum(eventExpenses.amount) }).from(eventExpenses);
+  const totalExpenses = Number(expenseResult?.total ?? 0);
+
+  // Total revenue from verified paid registrations
+  const revenueRows = await db
+    .select({
+      fee: events.fee,
+      count: count(),
+    })
+    .from(eventRegistrations)
+    .innerJoin(events, eq(eventRegistrations.eventId, events.id))
+    .where(sql`${eventRegistrations.paymentStatus} = 'verified' AND ${events.isPaid} = true`)
+    .groupBy(events.fee);
+
+  let totalRevenue = 0;
+  for (const row of revenueRows) {
+    totalRevenue += (row.fee ?? 0) * row.count;
+  }
+
+  // Total subsidized = total expenses - total revenue (if positive)
+  const totalSubsidy = Math.max(0, totalExpenses - totalRevenue);
+
+  // Remaining budget
+  const remainingBudget = totalBudget - totalSubsidy;
+
+  // Voucher count
+  const [voucherCount] = await db.select({ count: count() }).from(vouchers);
+
+  return {
+    totalBudget,
+    totalExpenses,
+    totalRevenue,
+    totalSubsidy,
+    remainingBudget,
+    totalVouchers: voucherCount?.count ?? 0,
   };
 };

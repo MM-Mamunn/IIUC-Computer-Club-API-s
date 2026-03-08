@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { authMiddleware } from '../../middlewares/auth.middleware';
 import { requireRole } from '../../middlewares/role.middleware';
-import { search, getUser, stats } from './user.controller';
+import { search, getUser, stats, budgetStats } from './user.controller';
 import { getRolesByPriorityRange } from '../global/global.service';
 
 const router = new Hono();
@@ -30,6 +30,14 @@ router.get(
   authMiddleware,
   requireRole(await getRolesByPriorityRange(1, 6)),
   stats,
+);
+
+// Budget stats (president/treasurer only, priority ≤ 5)
+router.get(
+  '/stats/budget',
+  authMiddleware,
+  requireRole(await getRolesByPriorityRange(1, 5)),
+  budgetStats,
 );
 
 // Get user by ID (must be last — catches all /:id patterns)
