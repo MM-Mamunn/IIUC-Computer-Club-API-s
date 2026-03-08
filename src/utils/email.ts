@@ -117,3 +117,53 @@ export async function sendEventRegistrationEmail(
     console.error('Failed to send event registration email:', err);
   }
 }
+
+/** Send payment confirmed email */
+export async function sendPaymentConfirmedEmail(
+  to: string,
+  name: string,
+  eventTitle: string,
+  eventDate: string,
+  venue: string | null,
+  fee: number,
+) {
+  const dateStr = new Date(eventDate).toLocaleString('en-US', {
+    dateStyle: 'full',
+    timeStyle: 'short',
+  });
+
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <h1 style="color: #1a1a1a; margin: 0;">IIUC Computer Club</h1>
+      </div>
+      <div style="background: #f0f9f0; border-radius: 8px; padding: 24px; margin-bottom: 16px;">
+        <h2 style="color: #2e7d32; margin-top: 0;">Payment Confirmed! ✅</h2>
+        <p style="color: #555; line-height: 1.6;">
+          Hi <strong>${name}</strong>, your payment has been verified for the following event:
+        </p>
+        <div style="background: #fff; border: 1px solid #c8e6c9; border-radius: 6px; padding: 16px; margin: 16px 0;">
+          <h3 style="margin-top: 0; color: #1a1a1a;">${eventTitle}</h3>
+          <p style="margin: 4px 0; color: #555;">📅 <strong>Date:</strong> ${dateStr}</p>
+          ${venue ? `<p style="margin: 4px 0; color: #555;">📍 <strong>Venue:</strong> ${venue}</p>` : ''}
+          <p style="margin: 4px 0; color: #555;">💰 <strong>Amount Paid:</strong> ৳${fee}</p>
+        </div>
+        <p style="color: #2e7d32; font-weight: bold;">Your registration is now fully confirmed. See you at the event!</p>
+      </div>
+      <p style="color: #999; font-size: 12px; text-align: center;">
+        This is an automated message from IIUC Computer Club. Please do not reply.
+      </p>
+    </div>
+  `;
+
+  try {
+    await transporter.sendMail({
+      from: FROM,
+      to,
+      subject: `Payment Confirmed — ${eventTitle}`,
+      html,
+    });
+  } catch (err) {
+    console.error('Failed to send payment confirmed email:', err);
+  }
+}

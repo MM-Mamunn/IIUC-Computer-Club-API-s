@@ -17,6 +17,7 @@ import {
   generateTempPassword,
   sendWelcomeEmail,
   sendEventRegistrationEmail,
+  sendPaymentConfirmedEmail,
 } from '../../utils/email';
 
 // ─── Create Event ───
@@ -405,6 +406,22 @@ export const verifyPayment = async (eventId: number, userId: string, verified: b
     .where(and(eq(eventRegistrations.eventId, eventId), eq(eventRegistrations.userId, userId)))
     .returning();
 
+  // Send confirmation email when verified
+  if (verified) {
+    const [user] = await db.select().from(users).where(eq(users.id, userId));
+    const [event] = await db.select().from(events).where(eq(events.id, eventId));
+    if (user?.email && event) {
+      sendPaymentConfirmedEmail(
+        user.email,
+        user.name,
+        event.title,
+        event.eventDate.toISOString(),
+        event.venue,
+        event.fee ?? 0,
+      );
+    }
+  }
+
   return updated;
 };
 
@@ -428,6 +445,20 @@ export const verifySslcommerzPayment = async (tranId: string, valId: string) => 
       and(eq(eventRegistrations.eventId, reg.eventId), eq(eventRegistrations.userId, reg.userId)),
     )
     .returning();
+
+  // Send confirmation email
+  const [user] = await db.select().from(users).where(eq(users.id, reg.userId));
+  const [event] = await db.select().from(events).where(eq(events.id, reg.eventId));
+  if (user?.email && event) {
+    sendPaymentConfirmedEmail(
+      user.email,
+      user.name,
+      event.title,
+      event.eventDate.toISOString(),
+      event.venue,
+      event.fee ?? 0,
+    );
+  }
 
   return updated;
 };

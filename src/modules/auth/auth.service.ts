@@ -76,6 +76,38 @@ export const loginUser = async (id: string, password: string) => {
   return { token };
 };
 
+/**
+ * Re-issue a JWT with the user's current role/position from the DB.
+ * Called by authenticated users to pick up role changes without re-login.
+ */
+export const refreshToken = async (c: Context) => {
+  const currentUser = c.get('user');
+  const [user] = await db.select().from(users).where(eq(users.id, currentUser.id));
+
+  if (!user) {
+    throw new HTTPException(401, { message: 'User not found' });
+  }
+
+  const active = await showActive();
+  const activeNumbers = active.map((a) => a.number);
+
+  const [pos] = activeNumbers.length
+    ? await db
+        .select()
+        .from(executives)
+        .where(and(eq(executives.id, user.id), inArray(executives.number, activeNumbers)))
+    : [];
+
+  const token = generateToken({
+    id: user.id,
+    role: pos?.role ?? 'student',
+    position: pos?.position ?? '',
+    mustChangePassword: user.mustChangePassword ?? false,
+  });
+
+  return { token };
+};
+
 export const saveImage = async (imageUrl: string, c: Context) => {
   const user = c.get('user');
   const userId = user.id;
