@@ -40,6 +40,7 @@ import {
   toggleFinancesLock,
 } from './event.service';
 import { uploadImageToCloudinary } from '../../utils/uploadImage';
+import { invalidate } from '../../utils/cache';
 
 export const create = async (c: Context) => {
   const contentType = c.req.header('content-type') ?? '';
@@ -56,6 +57,7 @@ export const create = async (c: Context) => {
       registrationDeadline: (formData.get('registrationDeadline') as string) || undefined,
       venue: (formData.get('venue') as string) || undefined,
       isPaid: formData.get('isPaid') === 'true',
+      isDonation: formData.get('isDonation') === 'true',
       fee: formData.get('fee') ? Number(formData.get('fee')) : 0,
       maxParticipants: formData.get('maxParticipants')
         ? Number(formData.get('maxParticipants'))
@@ -100,6 +102,7 @@ export const create = async (c: Context) => {
   }
 
   const event = await createEvent(data as any, c);
+  invalidate('events:');
   return c.json({ event }, 201);
 };
 
@@ -146,7 +149,7 @@ export const update = async (c: Context) => {
         }
         continue;
       }
-      if (key === 'isPaid' || key === 'sslcommerzEnabled') {
+      if (key === 'isPaid' || key === 'sslcommerzEnabled' || key === 'isDonation') {
         data[key] = value === 'true';
         continue;
       }
@@ -171,6 +174,7 @@ export const update = async (c: Context) => {
   }
 
   const event = await updateEvent(id, data);
+  invalidate('events:');
   return c.json({ event }, 200);
 };
 
@@ -178,6 +182,7 @@ export const remove = async (c: Context) => {
   const id = parseInt(c.req.param('id'));
   if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
   const result = await deleteEvent(id);
+  invalidate('events:');
   return c.json(result, 200);
 };
 
@@ -192,6 +197,7 @@ export const register = async (c: Context) => {
     body.paymentMethod,
     body.transactionId,
     body.customFieldResponses,
+    body.donationAmount ? Number(body.donationAmount) : undefined,
   );
   return c.json({ registration: reg }, 201);
 };
@@ -301,8 +307,8 @@ export const guestRegister = async (c: Context) => {
   if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
   const body = await c.req.json();
 
-  if (!body.studentId || !body.email || !body.name || !body.gender) {
-    return c.json({ message: 'studentId, email, name, and gender are required' }, 400);
+  if (!body.studentId || !body.email || !body.name || !body.gender || !body.password) {
+    return c.json({ message: 'studentId, email, name, gender, and password are required' }, 400);
   }
 
   const result = await guestRegisterForEvent(id, {
@@ -310,9 +316,11 @@ export const guestRegister = async (c: Context) => {
     email: body.email,
     name: body.name,
     gender: body.gender,
+    password: body.password,
     customFieldResponses: body.customFieldResponses,
     paymentMethod: body.paymentMethod,
     transactionId: body.transactionId,
+    donationAmount: body.donationAmount ? Number(body.donationAmount) : undefined,
   });
 
   return c.json(result, 201);

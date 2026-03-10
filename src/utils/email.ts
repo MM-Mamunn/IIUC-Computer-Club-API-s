@@ -167,3 +167,49 @@ export async function sendPaymentConfirmedEmail(
     console.error('Failed to send payment confirmed email:', err);
   }
 }
+
+/** Send password reset email with a reset link */
+export async function sendPasswordResetEmail(to: string, name: string, resetLink: string) {
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <h1 style="color: #1a1a1a; margin: 0;">IIUC Computer Club</h1>
+      </div>
+      <div style="background: #fff3e0; border-radius: 8px; padding: 24px; margin-bottom: 16px;">
+        <h2 style="color: #e65100; margin-top: 0;">Password Reset Request</h2>
+        <p style="color: #555; line-height: 1.6;">
+          Hi <strong>${name}</strong>, we received a request to reset your password.
+          Click the button below to set a new password:
+        </p>
+        <div style="text-align: center; margin: 24px 0;">
+          <a href="${resetLink}" style="background: #1976d2; color: #fff; text-decoration: none; padding: 12px 32px; border-radius: 6px; font-weight: bold; display: inline-block;">
+            Reset Password
+          </a>
+        </div>
+        <p style="color: #555; line-height: 1.6;">
+          Or copy and paste this link into your browser:
+        </p>
+        <p style="color: #1976d2; word-break: break-all; font-size: 13px;">
+          ${resetLink}
+        </p>
+        <p style="color: #d32f2f; font-weight: bold; margin-top: 16px;">
+          ⚠️ This link will expire in 15 minutes. If you did not request this, please ignore this email.
+        </p>
+      </div>
+      <p style="color: #999; font-size: 12px; text-align: center;">
+        This is an automated message from IIUC Computer Club. Please do not reply.
+      </p>
+    </div>
+  `;
+
+  try {
+    await transporter.sendMail({
+      from: FROM,
+      to,
+      subject: 'Password Reset — IIUC Computer Club',
+      html,
+    });
+  } catch (err) {
+    console.error('Failed to send password reset email:', err);
+  }
+}

@@ -15,7 +15,7 @@
  */
 import 'dotenv/config';
 import { db } from '../config/db';
-import { positions, roles, users, committee, executives } from '../db/schema';
+import { users, committee, executives } from '../db/schema';
 import {
   events,
   eventRegistrations,
@@ -255,39 +255,7 @@ async function seedMassive() {
   const bannerImages = [iftarImg1, iftarImg2, iftarImg3, iftarImg4, iftarMainImg, quranImg];
   console.log(`  ✅ ${bannerImages.length} banner images uploaded`);
 
-  // ─── 1. Ensure positions & roles exist ───
-  const positionList = [
-    { position: 'president', description: 'The president of the club' },
-    { position: 'vice president', description: 'Vice president of the club' },
-    { position: 'general secretary', description: 'General secretary of the club' },
-    { position: 'assistant general secretary', description: 'Assistant general secretary' },
-    { position: 'treasurer', description: 'Treasurer of the club' },
-    { position: 'innovation and tech', description: 'Innovation and tech secretary' },
-    { position: 'research and publication', description: 'Research and publication secretary' },
-    { position: 'event management', description: 'Event management secretary' },
-    { position: 'public relations', description: 'Public relations secretary' },
-    { position: 'media and design', description: 'Media and design secretary' },
-    { position: 'logistics', description: 'Logistics secretary' },
-  ];
-  await db.insert(positions).values(positionList).onConflictDoNothing();
-
-  const roleList = [
-    { role: 'president', priority: 1, description: 'President' },
-    { role: 'vice president 1', priority: 2, description: 'VP 1' },
-    { role: 'vice president 2', priority: 2, description: 'VP 2' },
-    { role: 'vice president 3', priority: 2, description: 'VP 3' },
-    { role: 'vice president 4', priority: 2, description: 'VP 4' },
-    { role: 'general secretary', priority: 3, description: 'GS' },
-    { role: 'treasurer', priority: 3, description: 'Treasurer' },
-    { role: 'assistant general secretary 1', priority: 4, description: 'AGS 1' },
-    { role: 'assistant general secretary 2', priority: 4, description: 'AGS 2' },
-    { role: 'secretary', priority: 5, description: 'Secretary' },
-    { role: 'assistant secretary', priority: 6, description: 'Assistant Secretary' },
-  ];
-  await db.insert(roles).values(roleList).onConflictDoNothing();
-  console.log('  ✅ Positions & roles ensured');
-
-  // ─── 2. Generate 200 users (100 male + 100 female) ───
+  // ─── 1. Generate 200 users (100 male + 100 female) ───
   const allUsers: { id: string; name: string; gender: string; email: string }[] = [];
 
   // Males: C221001 – C221100
@@ -333,7 +301,7 @@ async function seedMassive() {
   }
   console.log(`  ✅ ${allUsers.length} users created (password = id)`);
 
-  // ─── 3. Closed committees (2023, 2024, 2025) + active 2026 ───
+  // ─── 2. Closed committees (2023, 2024, 2025) — active 2026 already created by seed.ts ───
   const committeeData = [
     { number: '2023', gender: 'male', start: '2023-01-01', end: '2023-12-31', budget: 30000 },
     { number: '2023F', gender: 'female', start: '2023-01-01', end: '2023-12-31', budget: null },
@@ -341,8 +309,6 @@ async function seedMassive() {
     { number: '2024F', gender: 'female', start: '2024-01-01', end: '2024-12-31', budget: null },
     { number: '2025', gender: 'male', start: '2025-01-01', end: '2025-12-31', budget: 45000 },
     { number: '2025F', gender: 'female', start: '2025-01-01', end: '2025-12-31', budget: null },
-    { number: '2026', gender: 'male', start: '2026-01-01', end: null, budget: 50000 },
-    { number: '2026F', gender: 'female', start: '2026-01-01', end: null, budget: null },
   ];
   await db
     .insert(committee)
@@ -357,9 +323,9 @@ async function seedMassive() {
       })),
     )
     .onConflictDoNothing();
-  console.log('  ✅ 8 committees created (3 closed + 1 active, male+female)');
+  console.log('  ✅ 6 closed committees created (male+female)');
 
-  // ─── 4. Assign executives to each committee ───
+  // ─── 3. Assign executives to each committee ───
   const maleIds = allUsers.filter((u) => u.gender === 'male').map((u) => u.id);
   const femaleIds = allUsers.filter((u) => u.gender === 'female').map((u) => u.id);
 
@@ -374,8 +340,8 @@ async function seedMassive() {
     assignedBy: string;
   }[] = [];
 
-  const maleComms = ['2023', '2024', '2025', '2026'];
-  const femaleComms = ['2023F', '2024F', '2025F', '2026F'];
+  const maleComms = ['2023', '2024', '2025'];
+  const femaleComms = ['2023F', '2024F', '2025F'];
 
   for (const comNum of maleComms) {
     const presId = maleIds[maleIdx++];
@@ -529,7 +495,7 @@ async function seedMassive() {
   }
   console.log(`  ✅ ${execRows.length} executive assignments`);
 
-  // ─── 5. Events across all committees ───
+  // ─── 4. Events across all committees ───
   const eventRows: {
     title: string;
     description: string;
@@ -604,7 +570,7 @@ async function seedMassive() {
   }
   console.log(`  ✅ ${insertedEvents.length} events created`);
 
-  // ─── 6. Event registrations (batch insert) ───
+  // ─── 5. Event registrations (batch insert) ───
   const regRows: {
     eventId: number;
     userId: string;
@@ -640,7 +606,7 @@ async function seedMassive() {
   }
   console.log(`  ✅ ${regRows.length} event registrations`);
 
-  // ─── 7. Event expenses (batch insert) ───
+  // ─── 6. Event expenses (batch insert) ───
   const expRows: {
     eventId: number;
     description: string;
@@ -667,7 +633,7 @@ async function seedMassive() {
   }
   console.log(`  ✅ ${expRows.length} event expenses`);
 
-  // ─── 8. Expense claims (batch insert) ───
+  // ─── 7. Expense claims (batch insert) ───
   const claimRows: {
     eventId: number;
     userId: string;
@@ -709,7 +675,7 @@ async function seedMassive() {
   }
   console.log(`  ✅ ${claimRows.length} expense claims`);
 
-  // ─── 9. Vouchers (batch insert) ───
+  // ─── 8. Vouchers (batch insert) ───
   const voucherRows: {
     eventId: number;
     voucherNumber: string;
@@ -764,8 +730,8 @@ async function seedMassive() {
     `   ${regRows.length} registrations · ${expRows.length} expenses · ${claimRows.length} claims · ${voucherRows.length} vouchers`,
   );
   console.log('\n👤 All user passwords = their ID (e.g. C221001 / C221001)');
-  console.log('   Active committee 2026 president: C221001');
-  console.log('   Active committee 2026F VP1 (female): C221201');
+  console.log('   Closed committee 2025 president: C221025');
+  console.log('   Closed committee 2025F VP1 (female): C221225');
 
   process.exit(0);
 }

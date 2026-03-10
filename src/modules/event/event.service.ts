@@ -15,12 +15,8 @@ import type { Context } from 'hono';
 import { hashPassword } from '../../utils/hash';
 import { cached } from '../../utils/cache';
 import { assertCommitteeOpen } from '../global/global.service';
-import {
-  generateTempPassword,
-  sendWelcomeEmail,
-  sendEventRegistrationEmail,
-  sendPaymentConfirmedEmail,
-} from '../../utils/email';
+import { sendEventRegistrationEmail, sendPaymentConfirmedEmail } from '../../utils/email';
+import { generateToken } from '../../utils/jwt';
 
 // ─── Create Event ───
 export const createEvent = async (
@@ -32,6 +28,7 @@ export const createEvent = async (
     registrationDeadline?: string;
     venue?: string;
     isPaid?: boolean;
+    isDonation?: boolean;
     fee?: number;
     maxParticipants?: number;
     bannerImage?: string;
@@ -67,6 +64,7 @@ export const createEvent = async (
       registrationDeadline: data.registrationDeadline ? new Date(data.registrationDeadline) : null,
       venue: data.venue ?? null,
       isPaid: data.isPaid ?? false,
+      isDonation: data.isDonation ?? false,
       fee: data.fee ?? 0,
       maxParticipants: data.maxParticipants ?? null,
       bannerImage: data.bannerImage ?? null,
@@ -99,6 +97,7 @@ export const listEvents = (committeeNumber?: string, status?: string, gender?: s
           registrationDeadline: events.registrationDeadline,
           venue: events.venue,
           isPaid: events.isPaid,
+          isDonation: events.isDonation,
           fee: events.fee,
           maxParticipants: events.maxParticipants,
           bannerImage: events.bannerImage,
@@ -165,6 +164,7 @@ export const updateEvent = async (id: number, data: Record<string, unknown>) => 
     'registrationDeadline',
     'venue',
     'isPaid',
+    'isDonation',
     'fee',
     'maxParticipants',
     'bannerImage',
@@ -175,6 +175,7 @@ export const updateEvent = async (id: number, data: Record<string, unknown>) => 
     'estimatedBudget',
     'allocatedBudget',
     'genderRestriction',
+    'committeeNumber',
   ]);
 
   const updateData: Record<string, unknown> = {};
@@ -213,6 +214,7 @@ export const registerForEvent = async (
   paymentMethod?: string,
   transactionId?: string,
   customFieldResponses?: unknown,
+  donationAmount?: number,
 ) => {
   const [event] = await db.select().from(events).where(eq(events.id, eventId));
   if (!event) throw new HTTPException(404, { message: 'Event not found' });
@@ -259,12 +261,21 @@ export const registerForEvent = async (
     throw new HTTPException(409, { message: 'You are already registered for this event' });
 
   // For paid events with manual payment, require transaction ID
-  if (event.isPaid && paymentMethod && paymentMethod !== 'sslcommerz' && !transactionId) {
+  // For donation events, require a donation amount > 0
+  if (event.isDonation) {
+    if (!donationAmount || donationAmount <= 0) {
+      throw new HTTPException(400, { message: 'Please enter a donation amount' });
+    }
+    if (paymentMethod && paymentMethod !== 'sslcommerz' && !transactionId) {
+      throw new HTTPException(400, { message: 'Transaction ID is required for manual payment' });
+    }
+  } else if (event.isPaid && paymentMethod && paymentMethod !== 'sslcommerz' && !transactionId) {
+    // For regular paid events, require transaction ID for manual payment
     throw new HTTPException(400, { message: 'Transaction ID is required for manual payment' });
   }
 
   let paymentStatus = 'free';
-  if (event.isPaid) {
+  if (event.isPaid || event.isDonation) {
     paymentStatus =
       paymentMethod === 'sslcommerz' ? 'pending' : transactionId ? 'pending' : 'pending';
   }
@@ -275,8 +286,9 @@ export const registerForEvent = async (
       eventId,
       userId,
       paymentStatus,
-      paymentMethod: event.isPaid ? (paymentMethod ?? null) : null,
+      paymentMethod: event.isPaid || event.isDonation ? (paymentMethod ?? null) : null,
       transactionId: transactionId ?? null,
+      donationAmount: event.isDonation ? (donationAmount ?? null) : null,
       customFieldResponses: customFieldResponses ?? null,
     })
     .returning();
@@ -309,9 +321,11 @@ export const guestRegisterForEvent = async (
     email: string;
     name: string;
     gender: string;
+    password: string;
     customFieldResponses?: unknown;
     paymentMethod?: string;
     transactionId?: string;
+    donationAmount?: number;
   },
 ) => {
   // Validate gender
@@ -373,9 +387,12 @@ export const guestRegisterForEvent = async (
     });
   }
 
-  // Create account with temp password
-  const tempPassword = generateTempPassword();
-  const hashed = await hashPassword(tempPassword);
+  // Validate password
+  if (!data.password || data.password.length < 6) {
+    throw new HTTPException(400, { message: 'Password must be at least 6 characters' });
+  }
+
+  const hashed = await hashPassword(data.password);
 
   const [newUser] = await db
     .insert(users)
@@ -385,7 +402,7 @@ export const guestRegisterForEvent = async (
       email,
       password: hashed,
       gender: data.gender,
-      mustChangePassword: true,
+      mustChangePassword: false,
     })
     .returning();
 
@@ -402,17 +419,25 @@ export const guestRegisterForEvent = async (
 
   // Determine payment status
   let paymentStatus = 'free';
-  if (event.isPaid) {
+  if (event.isPaid || event.isDonation) {
     paymentStatus = 'pending';
   }
 
-  // For paid events with manual payment, require transaction ID
-  if (
+  // For donation events, require donation amount
+  if (event.isDonation) {
+    if (!data.donationAmount || data.donationAmount <= 0) {
+      throw new HTTPException(400, { message: 'Please enter a donation amount' });
+    }
+    if (data.paymentMethod && data.paymentMethod !== 'sslcommerz' && !data.transactionId) {
+      throw new HTTPException(400, { message: 'Transaction ID is required for manual payment' });
+    }
+  } else if (
     event.isPaid &&
     data.paymentMethod &&
     data.paymentMethod !== 'sslcommerz' &&
     !data.transactionId
   ) {
+    // For paid events with manual payment, require transaction ID
     throw new HTTPException(400, { message: 'Transaction ID is required for manual payment' });
   }
 
@@ -422,14 +447,24 @@ export const guestRegisterForEvent = async (
       eventId,
       userId: studentId,
       paymentStatus,
-      paymentMethod: event.isPaid ? (data.paymentMethod ?? null) : null,
+      paymentMethod: event.isPaid || event.isDonation ? (data.paymentMethod ?? null) : null,
       transactionId: data.transactionId ?? null,
+      donationAmount: event.isDonation ? (data.donationAmount ?? null) : null,
       customFieldResponses: data.customFieldResponses ?? null,
     })
     .returning();
 
-  // Send emails (async, don't block response)
-  sendWelcomeEmail(email, data.name.trim(), studentId, tempPassword);
+  // Generate JWT token for auto-login
+  const token = generateToken({
+    id: studentId,
+    role: 'student',
+    position: '',
+    gender: data.gender,
+    committeeNumber: '',
+    mustChangePassword: false,
+  });
+
+  // Send event registration confirmation email (async, don't block response)
   sendEventRegistrationEmail(
     email,
     data.name.trim(),
@@ -440,7 +475,7 @@ export const guestRegisterForEvent = async (
     event.fee ?? 0,
   );
 
-  return { registration: reg, event };
+  return { registration: reg, event, token };
 };
 
 // ─── Submit Payment for existing registration ───
@@ -1183,18 +1218,36 @@ export const getEventFinancials = async (eventId: number) => {
   const [event] = await db.select().from(events).where(eq(events.id, eventId));
   if (!event) throw new HTTPException(404, { message: 'Event not found' });
 
-  // Revenue: count of verified paid registrations × fee
-  const [revenueResult] = await db
-    .select({ count: count() })
-    .from(eventRegistrations)
-    .where(
-      and(
-        eq(eventRegistrations.eventId, eventId),
-        eq(eventRegistrations.paymentStatus, 'verified'),
-      ),
-    );
-  const verifiedCount = revenueResult?.count ?? 0;
-  const totalRevenue = event.isPaid ? verifiedCount * (event.fee ?? 0) : 0;
+  // Revenue calculation
+  let totalRevenue = 0;
+  let verifiedCount = 0;
+  if (event.isDonation) {
+    // For donation events: sum of verified donation amounts
+    const [donationResult] = await db
+      .select({ total: sum(eventRegistrations.donationAmount), count: count() })
+      .from(eventRegistrations)
+      .where(
+        and(
+          eq(eventRegistrations.eventId, eventId),
+          eq(eventRegistrations.paymentStatus, 'verified'),
+        ),
+      );
+    totalRevenue = Number(donationResult?.total ?? 0);
+    verifiedCount = donationResult?.count ?? 0;
+  } else if (event.isPaid) {
+    // For paid events: count of verified registrations × fee
+    const [revenueResult] = await db
+      .select({ count: count() })
+      .from(eventRegistrations)
+      .where(
+        and(
+          eq(eventRegistrations.eventId, eventId),
+          eq(eventRegistrations.paymentStatus, 'verified'),
+        ),
+      );
+    verifiedCount = revenueResult?.count ?? 0;
+    totalRevenue = verifiedCount * (event.fee ?? 0);
+  }
 
   // Expenses: sum of all event expenses
   const [expenseResult] = await db

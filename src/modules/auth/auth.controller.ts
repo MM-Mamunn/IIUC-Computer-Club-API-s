@@ -7,6 +7,8 @@ import {
   updateUser,
   changePassword,
   refreshToken,
+  forgotPassword,
+  resetPassword,
 } from './auth.service';
 import { uploadImageToCloudinary } from '../../utils/uploadImage';
 
@@ -80,5 +82,17 @@ export const changePass = async (c: Context) => {
 
 export const refresh = async (c: Context) => {
   const result = await refreshToken(c);
+  return c.json(result);
+};
+
+export const forgotPass = async (c: Context) => {
+  const { email, frontendUrl } = await c.req.json();
+  const result = await forgotPassword(email, frontendUrl || '');
+  return c.json(result);
+};
+
+export const resetPass = async (c: Context) => {
+  const { token, newPassword } = await c.req.json();
+  const result = await resetPassword(token, newPassword);
   return c.json(result);
 };

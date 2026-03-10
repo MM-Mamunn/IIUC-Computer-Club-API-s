@@ -142,6 +142,19 @@ async function seed() {
       gender: 'female',
       email: 'nusrat@iiuc.ac.bd',
     },
+    // Students (no executive role)
+    {
+      id: 'C231201',
+      name: 'Zahid Hasan',
+      gender: 'male',
+      email: 'zahid@iiuc.ac.bd',
+    },
+    {
+      id: 'C231202',
+      name: 'Samira Khan',
+      gender: 'female',
+      email: 'samira@iiuc.ac.bd',
+    },
   ];
 
   for (const u of userList) {
@@ -334,6 +347,7 @@ async function seed() {
       eventDate: new Date('2026-02-24T10:00:00'),
       venue: 'CSE Main Building (Donation Booth)',
       isPaid: false,
+      isDonation: true,
       fee: 0,
       bannerImage: charityImg,
       status: 'ongoing',
@@ -359,6 +373,8 @@ async function seed() {
   console.log('   Treasurer: C231103 / C231103');
   console.log('   AGS:      C231104 / C231104');
   console.log('   Secretary: C231105 / C231105');
+  console.log('   Student (male):  C231201 / C231201');
+  console.log('   Student (female): C231202 / C231202');
 
   process.exit(0);
 }

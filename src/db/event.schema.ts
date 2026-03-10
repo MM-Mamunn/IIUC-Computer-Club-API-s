@@ -44,7 +44,10 @@ export const events = pgTable('events', {
   /** Is it a paid event? */
   isPaid: boolean('is_paid').notNull().default(false),
 
-  /** Fee amount (0 if free) */
+  /** Is it a donation/charity event? (pay-what-you-want) */
+  isDonation: boolean('is_donation').notNull().default(false),
+
+  /** Fee amount (0 if free, suggested minimum if donation) */
   fee: doublePrecision('fee').default(0),
 
   /** Max participants (null = unlimited) */
@@ -139,6 +142,9 @@ export const eventRegistrations = pgTable(
 
     /** Transaction ID submitted by user (manual payment) */
     transactionId: varchar('transaction_id', { length: 255 }),
+
+    /** Donation amount for charity events (user-chosen) */
+    donationAmount: doublePrecision('donation_amount'),
 
     /** SSLCommerz validation ID for auto-verification */
     sslcommerzValId: varchar('sslcommerz_val_id', { length: 255 }),

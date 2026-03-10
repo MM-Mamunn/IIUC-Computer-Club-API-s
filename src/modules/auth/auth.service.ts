@@ -6,6 +6,9 @@ import { generateToken } from '../../utils/jwt';
 import { HTTPException } from 'hono/http-exception';
 import type { Context } from 'hono';
 import { showActive } from '../committee/committee.service';
+import { invalidate } from '../../utils/cache';
+import { sendPasswordResetEmail } from '../../utils/email';
+import jwt from 'jsonwebtoken';
 
 export const registerUser = async (
   id: string,
@@ -125,10 +128,19 @@ export const saveImage = async (imageUrl: string, c: Context) => {
   if (!updatedUser) {
     throw new HTTPException(404, { message: 'User not found' });
   }
+
+  invalidateUserCaches();
+
   return {
     profileImage: updatedUser.profileImage,
   };
 };
+
+// Invalidate committee member caches after profile data changes
+function invalidateUserCaches() {
+  invalidate('committee:members:');
+  invalidate('president:');
+}
 
 export const showMe = async (c: Context) => {
   const user = c.get('user');
@@ -198,6 +210,8 @@ export const updateUser = async (data: UpdateUserInput, c: Context) => {
     throw new HTTPException(404, { message: 'User not found' });
   }
 
+  invalidateUserCaches();
+
   return updatedUser;
 };
 
@@ -241,4 +255,65 @@ export const changePassword = async (currentPassword: string, newPassword: strin
   const token = await loginUser(use.id, newPassword);
   // return newUser;
   return { token };
+};
+
+// ─── Forgot Password ───
+export const forgotPassword = async (email: string, frontendUrl: string) => {
+  if (!email) {
+    throw new HTTPException(400, { message: 'Email is required' });
+  }
+
+  const [user] = await db.select().from(users).where(eq(users.email, email.toLowerCase().trim()));
+
+  if (!user) {
+    // Don't reveal whether the email exists
+    return { message: 'If an account with that email exists, a reset link has been sent.' };
+  }
+
+  // Generate a short-lived reset token (15 min)
+  const resetToken = jwt.sign({ id: user.id, purpose: 'password-reset' }, process.env.JWT_SECRET!, {
+    expiresIn: '15m',
+  });
+
+  const resetLink = `${frontendUrl}/reset-password?token=${resetToken}`;
+
+  await sendPasswordResetEmail(user.email, user.name, resetLink);
+
+  return { message: 'If an account with that email exists, a reset link has been sent.' };
+};
+
+// ─── Reset Password ───
+export const resetPassword = async (token: string, newPassword: string) => {
+  if (!token || !newPassword) {
+    throw new HTTPException(400, { message: 'Token and new password are required' });
+  }
+
+  if (newPassword.length < 6) {
+    throw new HTTPException(400, { message: 'Password must be at least 6 characters' });
+  }
+
+  let payload: { id: string; purpose: string };
+  try {
+    payload = jwt.verify(token, process.env.JWT_SECRET!) as { id: string; purpose: string };
+  } catch {
+    throw new HTTPException(400, { message: 'Invalid or expired reset link' });
+  }
+
+  if (payload.purpose !== 'password-reset') {
+    throw new HTTPException(400, { message: 'Invalid reset token' });
+  }
+
+  const [user] = await db.select().from(users).where(eq(users.id, payload.id));
+  if (!user) {
+    throw new HTTPException(404, { message: 'User not found' });
+  }
+
+  const hashed = await hashPassword(newPassword);
+
+  await db
+    .update(users)
+    .set({ password: hashed, mustChangePassword: false })
+    .where(eq(users.id, user.id));
+
+  return { message: 'Password has been reset successfully' };
 };
