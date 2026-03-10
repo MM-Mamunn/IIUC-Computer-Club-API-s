@@ -228,34 +228,34 @@ async function seed() {
       position: 'innovation and tech',
       assignedBy: 'C231139',
     },
-    // Female committee
+    // Female committee (no president — the male committee president oversees both)
     {
       id: 'C231140',
       number: '2026F',
-      role: 'president',
-      position: 'president',
-      assignedBy: 'C231140',
+      role: 'vice president 1',
+      position: 'vice president',
+      assignedBy: 'C231139',
     },
     {
       id: 'C231141',
       number: '2026F',
-      role: 'vice president 1',
-      position: 'vice president',
-      assignedBy: 'C231140',
+      role: 'general secretary',
+      position: 'general secretary',
+      assignedBy: 'C231139',
     },
     {
       id: 'C231142',
       number: '2026F',
-      role: 'general secretary',
-      position: 'general secretary',
-      assignedBy: 'C231140',
+      role: 'treasurer',
+      position: 'treasurer',
+      assignedBy: 'C231139',
     },
     {
       id: 'C231143',
       number: '2026F',
-      role: 'treasurer',
-      position: 'treasurer',
-      assignedBy: 'C231140',
+      role: 'assistant general secretary 1',
+      position: 'assistant general secretary',
+      assignedBy: 'C231139',
     },
   ];
 
@@ -352,8 +352,8 @@ async function seed() {
 
   console.log('\n🎉 Basic seed completed!\n');
   console.log('👤 Login accounts (password = id):');
-  console.log('   President (male):  C231139 / C231139');
-  console.log('   President (female): C231140 / C231140');
+  console.log('   President:  C231139 / C231139');
+  console.log('   Female VP:  C231140 / C231140');
   console.log('   VP:       C231101 / C231101');
   console.log('   GS:       C231102 / C231102');
   console.log('   Treasurer: C231103 / C231103');

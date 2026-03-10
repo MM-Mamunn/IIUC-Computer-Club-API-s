@@ -462,9 +462,12 @@ async function seedMassive() {
   }
 
   for (const comNum of femaleComms) {
-    const presId = femaleIds[femaleIdx++];
+    // No president in female committee — the male committee president oversees both
+    const maleComNum = comNum.replace('F', '');
+    const malePresExec = execRows.find((e) => e.number === maleComNum && e.role === 'president')!;
+    const presId = malePresExec.id;
+
     execRows.push(
-      { id: presId, number: comNum, role: 'president', position: 'president', assignedBy: presId },
       {
         id: femaleIds[femaleIdx++],
         number: comNum,
@@ -761,8 +764,8 @@ async function seedMassive() {
     `   ${regRows.length} registrations · ${expRows.length} expenses · ${claimRows.length} claims · ${voucherRows.length} vouchers`,
   );
   console.log('\n👤 All user passwords = their ID (e.g. C221001 / C221001)');
-  console.log('   Active committee 2026 president (male): C221001');
-  console.log('   Active committee 2026F president (female): C221201');
+  console.log('   Active committee 2026 president: C221001');
+  console.log('   Active committee 2026F VP1 (female): C221201');
 
   process.exit(0);
 }
