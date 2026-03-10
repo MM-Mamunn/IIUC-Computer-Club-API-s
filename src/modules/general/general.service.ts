@@ -1,25 +1,17 @@
+import { asc, desc } from 'drizzle-orm';
+import { db } from '../../config/db';
+import { positions, roles } from '../../db/schema';
+import { cached } from '../../utils/cache';
 
-import { asc, desc } from "drizzle-orm";
-import { db } from "../../config/db";
-import {  positions,  roles } from "../../db/schema";
+export const showPositions = () =>
+  cached('general:positions', 10 * 60_000, async () => {
+    return db.select().from(positions);
+  });
 
-export const showPositions = async () => {
-  
-  const poss = await db
-    .select()
-    .from(positions)
-  console.log(poss);
-  
-  return poss;
-};
-export const showRoles = async () => {
-  
-const result = await db
-  .select({role: roles.role, description: roles.description})
-  .from(roles)
-  .orderBy(
-    asc(roles.priority),
-    asc(roles.role)
-  );
-  return result;
-};
+export const showRoles = () =>
+  cached('general:roles', 10 * 60_000, async () => {
+    return db
+      .select({ role: roles.role, description: roles.description })
+      .from(roles)
+      .orderBy(asc(roles.priority), asc(roles.role));
+  });

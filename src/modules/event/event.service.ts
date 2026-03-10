@@ -13,6 +13,8 @@ import { eq, desc, and, or, count, sum } from 'drizzle-orm';
 import { HTTPException } from 'hono/http-exception';
 import type { Context } from 'hono';
 import { hashPassword } from '../../utils/hash';
+import { cached } from '../../utils/cache';
+import { assertCommitteeOpen } from '../global/global.service';
 import {
   generateTempPassword,
   sendWelcomeEmail,
@@ -46,6 +48,8 @@ export const createEvent = async (
   if (!data.title || !data.committeeNumber || !data.eventDate) {
     throw new HTTPException(400, { message: 'Title, committee, and event date are required' });
   }
+
+  await assertCommitteeOpen(data.committeeNumber);
 
   // Validate gender restriction
   const genderRestriction = data.genderRestriction ?? 'both';
@@ -81,55 +85,57 @@ export const createEvent = async (
 };
 
 // ─── List Events ───
-export const listEvents = async (committeeNumber?: string, status?: string, gender?: string) => {
-  if (gender) {
-    // Join with committee table to filter by gender
-    let query = db
-      .select({
-        id: events.id,
-        title: events.title,
-        description: events.description,
-        committeeNumber: events.committeeNumber,
-        eventDate: events.eventDate,
-        registrationDeadline: events.registrationDeadline,
-        venue: events.venue,
-        isPaid: events.isPaid,
-        fee: events.fee,
-        maxParticipants: events.maxParticipants,
-        bannerImage: events.bannerImage,
-        status: events.status,
-        paymentNumbers: events.paymentNumbers,
-        sslcommerzEnabled: events.sslcommerzEnabled,
-        customFields: events.customFields,
-        createdBy: events.createdBy,
-        estimatedBudget: events.estimatedBudget,
-        genderRestriction: events.genderRestriction,
-        createdAt: events.createdAt,
-      })
-      .from(events)
-      .innerJoin(committee, eq(events.committeeNumber, committee.number))
-      .orderBy(desc(events.eventDate))
-      .$dynamic();
+export const listEvents = (committeeNumber?: string, status?: string, gender?: string) => {
+  const cacheKey = `events:list:${committeeNumber ?? ''}:${status ?? ''}:${gender ?? ''}`;
+  return cached(cacheKey, 15_000, async () => {
+    if (gender) {
+      let query = db
+        .select({
+          id: events.id,
+          title: events.title,
+          description: events.description,
+          committeeNumber: events.committeeNumber,
+          eventDate: events.eventDate,
+          registrationDeadline: events.registrationDeadline,
+          venue: events.venue,
+          isPaid: events.isPaid,
+          fee: events.fee,
+          maxParticipants: events.maxParticipants,
+          bannerImage: events.bannerImage,
+          status: events.status,
+          paymentNumbers: events.paymentNumbers,
+          sslcommerzEnabled: events.sslcommerzEnabled,
+          customFields: events.customFields,
+          createdBy: events.createdBy,
+          estimatedBudget: events.estimatedBudget,
+          genderRestriction: events.genderRestriction,
+          createdAt: events.createdAt,
+        })
+        .from(events)
+        .innerJoin(committee, eq(events.committeeNumber, committee.number))
+        .orderBy(desc(events.eventDate))
+        .$dynamic();
 
-    const conditions = [or(eq(committee.gender, gender), eq(events.genderRestriction, 'both'))];
+      const conditions = [or(eq(committee.gender, gender), eq(events.genderRestriction, 'both'))];
+      if (committeeNumber) conditions.push(eq(events.committeeNumber, committeeNumber));
+      if (status) conditions.push(eq(events.status, status));
+      query = query.where(and(...conditions));
+
+      return query;
+    }
+
+    let query = db.select().from(events).orderBy(desc(events.eventDate)).$dynamic();
+
+    const conditions = [];
     if (committeeNumber) conditions.push(eq(events.committeeNumber, committeeNumber));
     if (status) conditions.push(eq(events.status, status));
-    query = query.where(and(...conditions));
+
+    if (conditions.length > 0) {
+      query = query.where(and(...conditions));
+    }
 
     return query;
-  }
-
-  let query = db.select().from(events).orderBy(desc(events.eventDate)).$dynamic();
-
-  const conditions = [];
-  if (committeeNumber) conditions.push(eq(events.committeeNumber, committeeNumber));
-  if (status) conditions.push(eq(events.status, status));
-
-  if (conditions.length > 0) {
-    query = query.where(and(...conditions));
-  }
-
-  return query;
+  });
 };
 
 // ─── Get Single Event with registration count ───
@@ -149,6 +155,7 @@ export const getEventById = async (id: number) => {
 export const updateEvent = async (id: number, data: Record<string, unknown>) => {
   const [existing] = await db.select().from(events).where(eq(events.id, id));
   if (!existing) throw new HTTPException(404, { message: 'Event not found' });
+  await assertCommitteeOpen(existing.committeeNumber);
 
   // Whitelist of allowed fields
   const allowed = new Set([
@@ -193,6 +200,7 @@ export const updateEvent = async (id: number, data: Record<string, unknown>) => 
 export const deleteEvent = async (id: number) => {
   const [existing] = await db.select().from(events).where(eq(events.id, id));
   if (!existing) throw new HTTPException(404, { message: 'Event not found' });
+  await assertCommitteeOpen(existing.committeeNumber);
 
   await db.delete(events).where(eq(events.id, id));
   return { success: true, message: 'Event deleted' };
@@ -658,6 +666,7 @@ export const assignDuty = async (
   const assigner = c.get('user');
   const [event] = await db.select().from(events).where(eq(events.id, eventId));
   if (!event) throw new HTTPException(404, { message: 'Event not found' });
+  await assertCommitteeOpen(event.committeeNumber);
 
   const [userExists] = await db.select().from(users).where(eq(users.id, userId));
   if (!userExists) throw new HTTPException(404, { message: 'User not found' });
@@ -685,6 +694,10 @@ export const assignDuty = async (
 
 // ─── Remove Duty ───
 export const removeDuty = async (eventId: number, userId: string, duty: string) => {
+  const [event] = await db.select().from(events).where(eq(events.id, eventId));
+  if (!event) throw new HTTPException(404, { message: 'Event not found' });
+  await assertCommitteeOpen(event.committeeNumber);
+
   const [existing] = await db
     .select()
     .from(eventDuties)
@@ -789,6 +802,7 @@ export const isEventManager = async (eventId: number, userId: string): Promise<b
 export const addEventManager = async (eventId: number, userId: string, assignedBy: string) => {
   const [event] = await db.select().from(events).where(eq(events.id, eventId));
   if (!event) throw new HTTPException(404, { message: 'Event not found' });
+  await assertCommitteeOpen(event.committeeNumber);
 
   const [userExists] = await db.select().from(users).where(eq(users.id, userId));
   if (!userExists) throw new HTTPException(404, { message: 'User not found' });
@@ -806,6 +820,10 @@ export const addEventManager = async (eventId: number, userId: string, assignedB
 
 /** Remove a user as manager for a specific event. */
 export const removeEventManager = async (eventId: number, userId: string) => {
+  const [event] = await db.select().from(events).where(eq(events.id, eventId));
+  if (!event) throw new HTTPException(404, { message: 'Event not found' });
+  await assertCommitteeOpen(event.committeeNumber);
+
   const [existing] = await db
     .select()
     .from(eventManagers)
@@ -868,6 +886,7 @@ export const addEventExpense = async (
 ) => {
   const [event] = await db.select().from(events).where(eq(events.id, eventId));
   if (!event) throw new HTTPException(404, { message: 'Event not found' });
+  await assertCommitteeOpen(event.committeeNumber);
   if (event.financesLocked) {
     throw new HTTPException(403, { message: 'Finances are locked for this event' });
   }
@@ -896,6 +915,13 @@ export const updateEventExpense = async (
 ) => {
   const [existing] = await db.select().from(eventExpenses).where(eq(eventExpenses.id, expenseId));
   if (!existing) throw new HTTPException(404, { message: 'Expense not found' });
+
+  // Check committee closed
+  const [evtForClose] = await db
+    .select({ committeeNumber: events.committeeNumber })
+    .from(events)
+    .where(eq(events.id, existing.eventId));
+  if (evtForClose) await assertCommitteeOpen(evtForClose.committeeNumber);
 
   // Check lock
   const [evt] = await db
@@ -929,6 +955,13 @@ export const updateEventExpense = async (
 export const deleteEventExpense = async (expenseId: number) => {
   const [existing] = await db.select().from(eventExpenses).where(eq(eventExpenses.id, expenseId));
   if (!existing) throw new HTTPException(404, { message: 'Expense not found' });
+
+  // Check committee closed
+  const [evtForClose] = await db
+    .select({ committeeNumber: events.committeeNumber })
+    .from(events)
+    .where(eq(events.id, existing.eventId));
+  if (evtForClose) await assertCommitteeOpen(evtForClose.committeeNumber);
 
   // Check lock
   const [evt] = await db
@@ -970,6 +1003,7 @@ export const submitExpenseClaim = async (
 ) => {
   const [event] = await db.select().from(events).where(eq(events.id, eventId));
   if (!event) throw new HTTPException(404, { message: 'Event not found' });
+  await assertCommitteeOpen(event.committeeNumber);
   if (event.financesLocked) {
     throw new HTTPException(403, { message: 'Finances are locked for this event' });
   }
@@ -1017,6 +1051,13 @@ export const reviewExpenseClaim = async (
     throw new HTTPException(400, { message: `Claim is already ${claim.status}` });
   }
 
+  // Check committee closed
+  const [evtForCommittee] = await db
+    .select({ committeeNumber: events.committeeNumber })
+    .from(events)
+    .where(eq(events.id, claim.eventId));
+  if (evtForCommittee) await assertCommitteeOpen(evtForCommittee.committeeNumber);
+
   // Check lock
   const [evt] = await db
     .select({ financesLocked: events.financesLocked })
@@ -1049,6 +1090,13 @@ export const markClaimPaid = async (
   if (claim.status !== 'approved') {
     throw new HTTPException(400, { message: 'Only approved claims can be marked as paid' });
   }
+
+  // Check committee closed
+  const [evtForCommittee] = await db
+    .select({ committeeNumber: events.committeeNumber })
+    .from(events)
+    .where(eq(events.id, claim.eventId));
+  if (evtForCommittee) await assertCommitteeOpen(evtForCommittee.committeeNumber);
 
   // Check lock
   const [evtForPay] = await db
@@ -1192,6 +1240,7 @@ export const getEventFinancials = async (eventId: number) => {
 export const generateVoucher = async (eventId: number, userId: string) => {
   const [event] = await db.select().from(events).where(eq(events.id, eventId));
   if (!event) throw new HTTPException(404, { message: 'Event not found' });
+  await assertCommitteeOpen(event.committeeNumber);
 
   // Check if voucher already exists for this event
   const [existing] = await db
@@ -1323,6 +1372,7 @@ export const getEventVoucher = async (eventId: number) => {
 export const toggleFinancesLock = async (eventId: number, userId: string, lock: boolean) => {
   const [event] = await db.select().from(events).where(eq(events.id, eventId));
   if (!event) throw new HTTPException(404, { message: 'Event not found' });
+  await assertCommitteeOpen(event.committeeNumber);
 
   if (lock && event.financesLocked) {
     throw new HTTPException(400, { message: 'Finances are already locked' });

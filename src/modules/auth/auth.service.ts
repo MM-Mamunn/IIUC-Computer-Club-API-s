@@ -68,6 +68,7 @@ export const loginUser = async (id: string, password: string) => {
     role: pos?.role ?? 'student',
     position: pos?.position ?? '',
     gender: user.gender,
+    committeeNumber: pos?.number ?? '',
     mustChangePassword: user.mustChangePassword ?? false,
   });
 
@@ -101,6 +102,7 @@ export const refreshToken = async (c: Context) => {
     role: pos?.role ?? 'student',
     position: pos?.position ?? '',
     gender: user.gender,
+    committeeNumber: pos?.number ?? '',
     mustChangePassword: user.mustChangePassword ?? false,
   });
 

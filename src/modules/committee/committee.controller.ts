@@ -12,9 +12,7 @@ import {
 type CommitteeBody = {
   number: string;
   start: string;
-  end?: string | null;
-  gender: string;
-  beginningBudget?: number | null;
+  beginningBudget: number;
   description?: string | null;
 };
 
@@ -24,11 +22,8 @@ export const newCommittee = async (c: Context) => {
   const committee = await addCommittee(
     body.number,
     body.start,
-    body.gender,
-    body.end ?? null,
-    body.beginningBudget ?? null,
+    body.beginningBudget,
     body.description ?? null,
-    c,
   );
 
   return c.json({ committee }, 201);
