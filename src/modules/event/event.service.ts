@@ -9,11 +9,11 @@ import {
   vouchers,
 } from '../../db/event.schema';
 import { users, committee } from '../../db/schema';
-import { eq, desc, and, or, count, sum, sql } from 'drizzle-orm';
+import { eq, desc, and, or, count, sum, sql, lte } from 'drizzle-orm';
 import { HTTPException } from 'hono/http-exception';
 import type { Context } from 'hono';
 import { hashPassword } from '../../utils/hash';
-import { cached } from '../../utils/cache';
+import { cached, invalidate } from '../../utils/cache';
 import { assertCommitteeOpen } from '../global/global.service';
 import {
   sendEventRegistrationEmail,
@@ -84,6 +84,40 @@ export const createEvent = async (
     .returning();
 
   return event;
+};
+
+// ─── Auto-update Event Statuses ───
+// Transitions: upcoming → ongoing (when eventDate passes), ongoing → completed (24h after eventDate)
+let lastAutoUpdate = 0;
+const AUTO_UPDATE_INTERVAL = 30_000; // Run at most every 30 seconds
+
+export const autoUpdateEventStatuses = async () => {
+  const now = Date.now();
+  if (now - lastAutoUpdate < AUTO_UPDATE_INTERVAL) return;
+  lastAutoUpdate = now;
+
+  const currentTime = new Date();
+  const ongoingCutoff = new Date(now - 24 * 60 * 60 * 1000); // 24h ago
+
+  // upcoming → ongoing: event date has passed
+  const toOngoing = await db
+    .update(events)
+    .set({ status: 'ongoing' })
+    .where(and(eq(events.status, 'upcoming'), lte(events.eventDate, currentTime)))
+    .returning({ id: events.id });
+
+  // ongoing → completed: 24h after event date
+  const toCompleted = await db
+    .update(events)
+    .set({ status: 'completed' })
+    .where(and(eq(events.status, 'ongoing'), lte(events.eventDate, ongoingCutoff)))
+    .returning({ id: events.id });
+
+  if (toOngoing.length > 0 || toCompleted.length > 0) {
+    invalidate('events:');
+    invalidate('dashboard:');
+    invalidate('president:');
+  }
 };
 
 // ─── List Events ───
@@ -896,6 +930,30 @@ export const getDraftData = async (eventId: number, userId: string) => {
 
 // ─── Unregister from Event ───
 export const unregisterFromEvent = async (eventId: number, userId: string) => {
+  const [event] = await db.select().from(events).where(eq(events.id, eventId));
+  if (!event) throw new HTTPException(404, { message: 'Event not found' });
+
+  // Block unregister after registration deadline, or on/after the event day if no deadline
+  const now = new Date();
+  if (event.registrationDeadline) {
+    if (new Date(event.registrationDeadline) < now) {
+      throw new HTTPException(400, {
+        message: 'Cannot unregister after the registration deadline has passed.',
+      });
+    }
+  } else {
+    // No deadline set — block on the event day
+    const eventDay = new Date(event.eventDate);
+    eventDay.setHours(0, 0, 0, 0);
+    const today = new Date(now);
+    today.setHours(0, 0, 0, 0);
+    if (today >= eventDay) {
+      throw new HTTPException(400, {
+        message: 'Cannot unregister on or after the event day.',
+      });
+    }
+  }
+
   const [existing] = await db
     .select()
     .from(eventRegistrations)

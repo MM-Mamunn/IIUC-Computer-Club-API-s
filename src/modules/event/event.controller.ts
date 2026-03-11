@@ -41,6 +41,7 @@ import {
   getFixPaymentDetails,
   fixPayment,
   getRegistrationStats,
+  autoUpdateEventStatuses,
 } from './event.service';
 import { uploadImageToCloudinary } from '../../utils/uploadImage';
 import { invalidate } from '../../utils/cache';
@@ -110,6 +111,9 @@ export const create = async (c: Context) => {
 };
 
 export const list = async (c: Context) => {
+  // Auto-transition event statuses before listing
+  await autoUpdateEventStatuses();
+
   const committeeNumber = c.req.query('committee');
   const status = c.req.query('status');
   const gender = c.req.query('gender');
