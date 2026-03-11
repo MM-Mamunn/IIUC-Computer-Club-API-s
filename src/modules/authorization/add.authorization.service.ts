@@ -3,11 +3,7 @@ import { executives, users } from '../../db/schema';
 import { eq, and, or } from 'drizzle-orm';
 import { HTTPException } from 'hono/http-exception';
 import type { Context } from 'hono';
-import {
-  assertCommitteeOpen,
-  genderMatch,
-  getRolesByPriorityRange,
-} from '../global/global.service';
+import { assertCommitteeOpen, getRolesByPriorityRange } from '../global/global.service';
 import { log } from 'node:console';
 
 // FUNCTIONS TO ADD VICE PRESIDENT
@@ -25,11 +21,6 @@ export const addVicePresident = async (id: string, role: string, number: string,
   ) {
     throw new HTTPException(400, {
       message: `Invalid role ${role}. Must be vice president 1, 2, 3, or 4`,
-    });
-  }
-  if ((await genderMatch(user.id, number)) === false) {
-    throw new HTTPException(403, {
-      message: 'You cannot create a committee for a different gender',
     });
   }
   const existing = await db
@@ -66,11 +57,6 @@ export const addTreasurer = async (id: string, number: string, c: Context) => {
   const user = c.get('user');
 
   await assertCommitteeOpen(number);
-  if ((await genderMatch(user.id, number)) === false) {
-    throw new HTTPException(403, {
-      message: 'You cannot create a committee for a different gender',
-    });
-  }
   const existing = await db
     .select()
     .from(executives)
@@ -104,11 +90,6 @@ export const addTreasurer = async (id: string, number: string, c: Context) => {
 export const addGeneralSecretary = async (id: string, number: string, c: Context) => {
   const user = c.get('user');
   await assertCommitteeOpen(number);
-  if ((await genderMatch(user.id, number)) === false) {
-    throw new HTTPException(403, {
-      message: 'You cannot create a committee for a different gender',
-    });
-  }
   const existing = await db
     .select()
     .from(executives)
@@ -157,11 +138,6 @@ export const addAsstGeneralSecretary = async (
     throw new HTTPException(409, { message: `role not in allowed range` });
   }
 
-  if ((await genderMatch(user.id, number)) === false) {
-    throw new HTTPException(403, {
-      message: 'You cannot create a committee for a different gender',
-    });
-  }
   const existing = await db
     .select()
     .from(executives)
@@ -209,11 +185,6 @@ export const addSecretaries = async (
     throw new HTTPException(409, { message: `role not in allowed range` });
   }
 
-  if ((await genderMatch(user.id, number)) === false) {
-    throw new HTTPException(403, {
-      message: 'You cannot create a committee for a different gender',
-    });
-  }
   if (
     position == 'president' ||
     position == 'general secretary' ||
@@ -266,11 +237,6 @@ export const addSecretaries = async (
 export const deleteMember = async (id: string, number: string, c: Context) => {
   const user = c.get('user');
   await assertCommitteeOpen(number);
-  if ((await genderMatch(user.id, number)) === false) {
-    throw new HTTPException(403, {
-      message: 'You cannot delete a member for a different gender',
-    });
-  }
   const existing = await db
     .select()
     .from(executives)

@@ -11,6 +11,7 @@ import {
   register,
   unregister,
   registrations,
+  registrationStatsController,
   assignDutyController,
   removeDutyController,
   duties,
@@ -42,6 +43,8 @@ import {
   getVoucherController,
   updateRegistrationResponsesController,
   toggleFinancesLockController,
+  getFixPaymentDetailsController,
+  fixPaymentController,
 } from './event.controller';
 import { initiateSslcommerzPayment, handleSslcommerzIpn } from './sslcommerz.service';
 import type { Context } from 'hono';
@@ -50,10 +53,23 @@ const router = new Hono();
 
 // ─── Public / any authenticated user ───
 router.get('/', list);
+
+// ─── Registration stats (must be before /:id to avoid route conflict) ───
+router.get(
+  '/registration-stats',
+  authMiddleware,
+  requireRole(await getRolesByPriorityRange(1, 4)),
+  registrationStatsController,
+);
+
 router.get('/:id', getOne);
 
 // ─── Guest event registration (no auth — creates account + registers) ───
 router.post('/:id/guest-register', guestRegister);
+
+// ─── Fix payment (public — uses token from rejection email) ───
+router.get('/:id/fix-payment', getFixPaymentDetailsController);
+router.post('/:id/fix-payment', fixPaymentController);
 
 // ─── Authenticated-only ───
 router.post('/:id/register', authMiddleware, register);

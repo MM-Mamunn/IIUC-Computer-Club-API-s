@@ -1,11 +1,12 @@
 import { db } from '../../config/db';
 import { users, executives, committee } from '../../db/schema';
+import { roles as rolesTable } from '../../db/schema';
 import { events, eventRegistrations, eventExpenses, vouchers } from '../../db/event.schema';
 import { eq, and, ilike, or, count, isNull, sum, inArray } from 'drizzle-orm';
 import { cached } from '../../utils/cache';
 
 // ─── Search Users ───
-export const searchUsers = async (query: string) => {
+export const searchUsers = async (query: string, committeeNumber?: string, callerRole?: string) => {
   const results = await db
     .select({
       id: users.id,
@@ -24,7 +25,86 @@ export const searchUsers = async (query: string) => {
     )
     .limit(20);
 
-  return results;
+  // Fetch role priorities for filtering
+  const rolePriorities = await db
+    .select({ role: rolesTable.role, priority: rolesTable.priority })
+    .from(rolesTable);
+  const priorityMap = new Map(rolePriorities.map((r) => [r.role, r.priority]));
+
+  // Get caller's role priority for filtering
+  const callerPriority = callerRole ? (priorityMap.get(callerRole) ?? Infinity) : Infinity;
+
+  const userIds = results.map((r) => r.id);
+
+  // Fetch ALL executive roles for matched users (across all active committees)
+  // to filter out users with equal or higher roles
+  let execByUser = new Map<
+    string,
+    { role: string | null; position: string | null; committeeNumber: string }[]
+  >();
+  if (userIds.length > 0) {
+    // Get active committee numbers
+    const activeComms = await db
+      .select({ number: committee.number })
+      .from(committee)
+      .where(isNull(committee.end));
+    const activeNumbers = activeComms.map((c) => c.number);
+
+    if (activeNumbers.length > 0) {
+      const allExecRoles = await db
+        .select({
+          id: executives.id,
+          role: executives.role,
+          position: executives.position,
+          number: executives.number,
+        })
+        .from(executives)
+        .where(and(inArray(executives.id, userIds), inArray(executives.number, activeNumbers)));
+
+      for (const e of allExecRoles) {
+        const arr = execByUser.get(e.id) || [];
+        arr.push({ role: e.role, position: e.position, committeeNumber: e.number });
+        execByUser.set(e.id, arr);
+      }
+    }
+  }
+
+  // Filter out users who hold a role with priority <= caller's priority in ANY active committee
+  let filteredResults = results;
+  if (callerRole && callerPriority < Infinity) {
+    filteredResults = results.filter((u) => {
+      const execRoles = execByUser.get(u.id);
+      if (!execRoles || execRoles.length === 0) return true; // no role = eligible
+      // Check if ANY of their roles has priority <= caller's priority
+      const hasHigherOrEqualRole = execRoles.some((e) => {
+        if (!e.role) return false;
+        const p = priorityMap.get(e.role);
+        return p != null && p <= callerPriority;
+      });
+      return !hasHigherOrEqualRole;
+    });
+  }
+
+  // If a committee number is provided, attach the user's role in THAT committee
+  if (committeeNumber) {
+    return filteredResults.map((u) => {
+      const execRoles = execByUser.get(u.id);
+      const committeeExec = execRoles?.find((e) => e.committeeNumber === committeeNumber);
+      return {
+        ...u,
+        currentRole: committeeExec?.role ?? null,
+        currentPosition: committeeExec?.position ?? null,
+        rolePriority: committeeExec?.role ? (priorityMap.get(committeeExec.role) ?? null) : null,
+      };
+    });
+  }
+
+  return filteredResults.map((u) => ({
+    ...u,
+    currentRole: null as string | null,
+    currentPosition: null as string | null,
+    rolePriority: null as number | null,
+  }));
 };
 
 // ─── Get User by ID ───

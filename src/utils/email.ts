@@ -75,11 +75,23 @@ export async function sendEventRegistrationEmail(
   venue: string | null,
   isPaid: boolean,
   fee: number,
+  isDonation?: boolean,
 ) {
   const dateStr = new Date(eventDate).toLocaleString('en-US', {
     dateStyle: 'full',
     timeStyle: 'short',
   });
+
+  const paymentLine = isDonation
+    ? '<p style="margin: 4px 0; color: #555;">🤝 <strong>Donation Event</strong></p>'
+    : isPaid
+      ? `<p style="margin: 4px 0; color: #555;">💰 <strong>Fee:</strong> ৳${fee}</p>`
+      : '<p style="margin: 4px 0; color: #555;">🆓 <strong>Free Event</strong></p>';
+
+  const pendingNote =
+    isPaid || isDonation
+      ? '<p style="color: #f57c00;">Your payment is pending verification. You will be notified once it is confirmed.</p>'
+      : '';
 
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
@@ -95,9 +107,9 @@ export async function sendEventRegistrationEmail(
           <h3 style="margin-top: 0; color: #1a1a1a;">${eventTitle}</h3>
           <p style="margin: 4px 0; color: #555;">📅 <strong>Date:</strong> ${dateStr}</p>
           ${venue ? `<p style="margin: 4px 0; color: #555;">📍 <strong>Venue:</strong> ${venue}</p>` : ''}
-          ${isPaid ? `<p style="margin: 4px 0; color: #555;">💰 <strong>Fee:</strong> ৳${fee}</p>` : '<p style="margin: 4px 0; color: #555;">🆓 <strong>Free Event</strong></p>'}
+          ${paymentLine}
         </div>
-        ${isPaid ? '<p style="color: #f57c00;">Your payment is pending verification. You will be notified once it is confirmed.</p>' : ''}
+        ${pendingNote}
         <p style="color: #555;">We look forward to seeing you at the event!</p>
       </div>
       <p style="color: #999; font-size: 12px; text-align: center;">
@@ -126,11 +138,16 @@ export async function sendPaymentConfirmedEmail(
   eventDate: string,
   venue: string | null,
   fee: number,
+  isDonation?: boolean,
 ) {
   const dateStr = new Date(eventDate).toLocaleString('en-US', {
     dateStyle: 'full',
     timeStyle: 'short',
   });
+
+  const amountLine = isDonation
+    ? '<p style="margin: 4px 0; color: #555;">🤝 <strong>Donation Received</strong> — Thank you for your generosity!</p>'
+    : `<p style="margin: 4px 0; color: #555;">💰 <strong>Amount Paid:</strong> ৳${fee}</p>`;
 
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
@@ -146,7 +163,7 @@ export async function sendPaymentConfirmedEmail(
           <h3 style="margin-top: 0; color: #1a1a1a;">${eventTitle}</h3>
           <p style="margin: 4px 0; color: #555;">📅 <strong>Date:</strong> ${dateStr}</p>
           ${venue ? `<p style="margin: 4px 0; color: #555;">📍 <strong>Venue:</strong> ${venue}</p>` : ''}
-          <p style="margin: 4px 0; color: #555;">💰 <strong>Amount Paid:</strong> ৳${fee}</p>
+          ${amountLine}
         </div>
         <p style="color: #2e7d32; font-weight: bold;">Your registration is now fully confirmed. See you at the event!</p>
       </div>
@@ -211,5 +228,121 @@ export async function sendPasswordResetEmail(to: string, name: string, resetLink
     });
   } catch (err) {
     console.error('Failed to send password reset email:', err);
+  }
+}
+
+/** Send payment rejection email with a link to fix payment */
+export async function sendPaymentRejectionEmail(
+  to: string,
+  name: string,
+  eventTitle: string,
+  eventDate: string,
+  venue: string | null,
+  rejectionReason: string,
+  fixPaymentLink: string,
+  fee: number,
+  isDonation: boolean,
+  rejectionType: string = 'other',
+  amountDeficit?: number,
+) {
+  const dateStr = new Date(eventDate).toLocaleString('en-US', {
+    dateStyle: 'full',
+    timeStyle: 'short',
+  });
+
+  const amountLine = isDonation
+    ? '<p style="margin: 4px 0; color: #555;">🤝 <strong>Donation Event</strong></p>'
+    : `<p style="margin: 4px 0; color: #555;">💰 <strong>Amount Required:</strong> ৳${fee}</p>`;
+
+  // Type-specific content
+  let reasonTitle = 'Reason for Rejection:';
+  let reasonMessage = rejectionReason;
+  let instructionText =
+    'Please submit a new payment using the button below. Make sure to use the correct amount and payment method.';
+  let buttonLabel = 'Fix Payment';
+  let extraInfo = '';
+
+  if (rejectionType === 'incorrect_trxid') {
+    reasonTitle = 'Issue: Incorrect Transaction ID';
+    reasonMessage =
+      'Your transaction ID could not be verified or was entered incorrectly. Please submit the correct transaction ID.';
+    instructionText =
+      'Click the button below to submit your correct Transaction ID. You do not need to make a new payment.';
+    buttonLabel = 'Update Transaction ID';
+  } else if (rejectionType === 'incorrect_amount') {
+    reasonTitle = 'Issue: Incorrect Payment Amount';
+    if (amountDeficit && amountDeficit > 0) {
+      reasonMessage = `The payment amount you submitted does not match the required amount. You need to pay <strong>৳${amountDeficit}</strong> more to complete your registration.`;
+      extraInfo = `
+        <div style="background: #fffbeb; border: 1px solid #fcd34d; border-radius: 6px; padding: 16px; margin: 16px 0; text-align: center;">
+          <p style="margin: 0; color: #92400e; font-weight: bold; font-size: 16px;">Amount Due: ৳${amountDeficit}</p>
+          <p style="margin: 4px 0 0; color: #92400e; font-size: 13px;">Please pay this remaining amount to complete your registration.</p>
+        </div>`;
+    } else {
+      reasonMessage =
+        'The payment amount you submitted does not match the required amount. Please make a new payment with the correct amount.';
+    }
+    instructionText = 'Click the button below to submit the remaining payment.';
+    buttonLabel = 'Pay Remaining Amount';
+  }
+
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <h1 style="color: #1a1a1a; margin: 0;">IIUC Computer Club</h1>
+      </div>
+      <div style="background: #fef2f2; border-radius: 8px; padding: 24px; margin-bottom: 16px;">
+        <h2 style="color: #dc2626; margin-top: 0;">Payment Rejected ❌</h2>
+        <p style="color: #555; line-height: 1.6;">
+          Hi <strong>${name}</strong>, your payment for the following event has been rejected:
+        </p>
+        <div style="background: #fff; border: 1px solid #fecaca; border-radius: 6px; padding: 16px; margin: 16px 0;">
+          <h3 style="margin-top: 0; color: #1a1a1a;">${eventTitle}</h3>
+          <p style="margin: 4px 0; color: #555;">📅 <strong>Date:</strong> ${dateStr}</p>
+          ${venue ? `<p style="margin: 4px 0; color: #555;">📍 <strong>Venue:</strong> ${venue}</p>` : ''}
+          ${amountLine}
+        </div>
+        <div style="background: #fff; border: 1px solid #fecaca; border-radius: 6px; padding: 16px; margin: 16px 0;">
+          <p style="margin: 0; color: #dc2626; font-weight: bold;">${reasonTitle}</p>
+          <p style="margin: 8px 0 0; color: #555;">${reasonMessage}</p>
+        </div>
+        ${extraInfo}
+        <p style="color: #555; line-height: 1.6;">
+          ${instructionText}
+        </p>
+        <div style="text-align: center; margin: 24px 0;">
+          <a href="${fixPaymentLink}" style="background: #1976d2; color: #fff; text-decoration: none; padding: 12px 32px; border-radius: 6px; font-weight: bold; display: inline-block;">
+            ${buttonLabel}
+          </a>
+        </div>
+        <p style="color: #555; line-height: 1.6;">
+          Or copy and paste this link into your browser:
+        </p>
+        <p style="color: #1976d2; word-break: break-all; font-size: 13px;">
+          ${fixPaymentLink}
+        </p>
+      </div>
+      <p style="color: #999; font-size: 12px; text-align: center;">
+        This is an automated message from IIUC Computer Club. Please do not reply.
+      </p>
+    </div>
+  `;
+
+  const subjectSuffix =
+    rejectionType === 'incorrect_trxid'
+      ? 'Incorrect Transaction ID'
+      : rejectionType === 'incorrect_amount'
+        ? 'Incorrect Payment Amount'
+        : 'Payment Rejected';
+
+  try {
+    await transporter.sendMail({
+      from: FROM,
+      to,
+      subject: `${subjectSuffix} — ${eventTitle}`,
+      html,
+    });
+  } catch (err) {
+    console.error('Failed to send payment rejection email:', err);
   }
 }

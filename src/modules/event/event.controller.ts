@@ -38,6 +38,9 @@ import {
   getEventVoucher,
   updateRegistrationResponses,
   toggleFinancesLock,
+  getFixPaymentDetails,
+  fixPayment,
+  getRegistrationStats,
 } from './event.service';
 import { uploadImageToCloudinary } from '../../utils/uploadImage';
 import { invalidate } from '../../utils/cache';
@@ -217,6 +220,11 @@ export const registrations = async (c: Context) => {
   return c.json({ registrations: regs }, 200);
 };
 
+export const registrationStatsController = async (c: Context) => {
+  const stats = await getRegistrationStats();
+  return c.json({ stats }, 200);
+};
+
 export const updateRegistrationResponsesController = async (c: Context) => {
   const id = parseInt(c.req.param('id'));
   if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
@@ -242,9 +250,43 @@ export const submitPaymentController = async (c: Context) => {
 export const verifyPaymentController = async (c: Context) => {
   const id = parseInt(c.req.param('id'));
   if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
-  const { userId, verified } = await c.req.json();
+  const { userId, verified, rejectionReason, frontendBaseUrl, rejectionType, correctAmount } =
+    await c.req.json();
   if (!userId) return c.json({ message: 'userId is required' }, 400);
-  const result = await verifyPayment(id, userId.toUpperCase(), verified !== false);
+  const result = await verifyPayment(
+    id,
+    userId.toUpperCase(),
+    verified !== false,
+    rejectionReason,
+    frontendBaseUrl,
+    rejectionType,
+    correctAmount ? Number(correctAmount) : undefined,
+  );
+  return c.json({ registration: result }, 200);
+};
+
+export const getFixPaymentDetailsController = async (c: Context) => {
+  const id = parseInt(c.req.param('id'));
+  if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
+  const token = c.req.query('token');
+  if (!token) return c.json({ message: 'Token is required' }, 400);
+  const details = await getFixPaymentDetails(id, token);
+  return c.json(details, 200);
+};
+
+export const fixPaymentController = async (c: Context) => {
+  const id = parseInt(c.req.param('id'));
+  if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
+  const { token, paymentMethod, transactionId, donationAmount, mfsNumber } = await c.req.json();
+  if (!token) return c.json({ message: 'Token is required' }, 400);
+  const result = await fixPayment(
+    id,
+    token,
+    paymentMethod,
+    transactionId,
+    donationAmount ? Number(donationAmount) : undefined,
+    mfsNumber,
+  );
   return c.json({ registration: result }, 200);
 };
 

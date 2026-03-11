@@ -161,6 +161,21 @@ export const eventRegistrations = pgTable(
      * value can be string, string[], or number depending on field type.
      */
     customFieldResponses: jsonb('custom_field_responses'),
+
+    /** Latest rejection reason (when admin rejects payment) */
+    rejectionReason: varchar('rejection_reason', { length: 500 }),
+
+    /** Type of the latest rejection: incorrect_trxid | incorrect_amount | other */
+    rejectionType: varchar('rejection_type', { length: 30 }),
+
+    /**
+     * History of payment rejections.
+     * Stored as JSON array: [{ reason, type, rejectedAt, transactionId, paymentMethod, amountDeficit? }]
+     */
+    rejectionHistory: jsonb('rejection_history'),
+
+    /** Whether the fix-payment token has been used */
+    fixPaymentUsed: boolean('fix_payment_used').default(false),
   },
   (table) => ({
     pk: primaryKey({ columns: [table.eventId, table.userId] }),
