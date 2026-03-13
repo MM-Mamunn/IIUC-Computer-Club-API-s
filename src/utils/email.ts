@@ -346,3 +346,104 @@ export async function sendPaymentRejectionEmail(
     console.error('Failed to send payment rejection email:', err);
   }
 }
+
+/** Notify student that a refund case has been opened for their registration */
+export async function sendRefundOpenedEmail(
+  to: string,
+  name: string,
+  eventTitle: string,
+  refundAmount: number,
+) {
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <h1 style="color: #1a1a1a; margin: 0;">IIUC Computer Club</h1>
+      </div>
+      <div style="background: #fdf6ec; border-radius: 8px; padding: 24px; margin-bottom: 16px;">
+        <h2 style="color: #b45309; margin-top: 0;">Event Cancelled — Refund Initiated 💸</h2>
+        <p style="color: #555; line-height: 1.6;">
+          Hi <strong>${name}</strong>, unfortunately the event <strong>${eventTitle}</strong> has been cancelled.
+        </p>
+        <p style="color: #555; line-height: 1.6;">
+          We will refund your full registration fee of <strong>৳${refundAmount}</strong>.
+        </p>
+        <p style="color: #555; line-height: 1.6;">
+          Please log in to your dashboard and navigate to <strong>My Refunds</strong>
+          to submit your preferred refund destination (bKash, Nagad, or cash pickup).
+        </p>
+      </div>
+      <p style="color: #999; font-size: 12px; text-align: center;">
+        This is an automated message from IIUC Computer Club. Please do not reply.
+      </p>
+    </div>
+  `;
+
+  try {
+    await transporter.sendMail({
+      from: FROM,
+      to,
+      subject: `Refund Initiated — ${eventTitle}`,
+      html,
+    });
+  } catch (err) {
+    console.error('Failed to send refund opened email:', err);
+  }
+}
+
+/** Notify student of a refund status change */
+export async function sendRefundStatusEmail(
+  to: string,
+  name: string,
+  eventTitle: string,
+  status: string,
+  rejectionReason?: string,
+) {
+  const statusMessages: Record<string, { headline: string; body: string; color: string }> = {
+    approved: {
+      headline: 'Refund Approved ✅',
+      body: 'Your refund destination has been reviewed and approved. The organizer will process your refund shortly.',
+      color: '#2e7d32',
+    },
+    rejected: {
+      headline: 'Refund Destination Rejected ❌',
+      body: `Your refund destination was rejected${rejectionReason ? `: <em>${rejectionReason}</em>` : ''}. Please log in and resubmit with correct information.`,
+      color: '#c62828',
+    },
+    paid: {
+      headline: 'Refund Sent 💸',
+      body: 'Your refund has been processed and sent. Please log in to confirm receipt and view the proof of payment.',
+      color: '#1565c0',
+    },
+  };
+
+  const meta = statusMessages[status];
+  if (!meta) return;
+
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <h1 style="color: #1a1a1a; margin: 0;">IIUC Computer Club</h1>
+      </div>
+      <div style="background: #f8f9fa; border-radius: 8px; padding: 24px; margin-bottom: 16px;">
+        <h2 style="color: ${meta.color}; margin-top: 0;">${meta.headline}</h2>
+        <p style="color: #555; line-height: 1.6;">Hi <strong>${name}</strong>,</p>
+        <p style="color: #555; line-height: 1.6;">${meta.body}</p>
+        <p style="color: #555; line-height: 1.6;">Event: <strong>${eventTitle}</strong></p>
+      </div>
+      <p style="color: #999; font-size: 12px; text-align: center;">
+        This is an automated message from IIUC Computer Club. Please do not reply.
+      </p>
+    </div>
+  `;
+
+  try {
+    await transporter.sendMail({
+      from: FROM,
+      to,
+      subject: `Refund Update — ${eventTitle}`,
+      html,
+    });
+  } catch (err) {
+    console.error('Failed to send refund status email:', err);
+  }
+}

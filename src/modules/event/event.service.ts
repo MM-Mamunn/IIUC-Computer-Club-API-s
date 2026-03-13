@@ -7,7 +7,9 @@ import {
   eventExpenses,
   expenseClaims,
   vouchers,
+  refundRequests,
 } from '../../db/event.schema';
+import { createRefundCasesForEvent } from '../refund/refund.service';
 import { users, committee } from '../../db/schema';
 import { eq, desc, and, or, count, sum, sql, lte } from 'drizzle-orm';
 import { HTTPException } from 'hono/http-exception';
@@ -232,6 +234,19 @@ export const updateEvent = async (id: number, data: Record<string, unknown>) => 
   }
 
   const [updated] = await db.update(events).set(updateData).where(eq(events.id, id)).returning();
+
+  // Auto-create refund cases only for cancelled paid events.
+  const nextStatus = (updateData.status as string | undefined) ?? existing.status;
+  const nextIsPaid = (updateData.isPaid as boolean | undefined) ?? existing.isPaid ?? false;
+  const nextIsDonation =
+    (updateData.isDonation as boolean | undefined) ?? existing.isDonation ?? false;
+
+  if (nextStatus === 'cancelled' && (nextIsPaid || nextIsDonation)) {
+    createRefundCasesForEvent(id).catch((err) =>
+      console.error('[Refund] Failed to create refund cases:', err),
+    );
+  }
+
   return updated;
 };
 
@@ -1602,12 +1617,40 @@ export const getEventFinancials = async (eventId: number) => {
     totalRevenue = verifiedCount * (event.fee ?? 0);
   }
 
-  // Expenses: sum of all event expenses
+  // Base expenses: sum of all event expenses
   const [expenseResult] = await db
     .select({ total: sum(eventExpenses.amount) })
     .from(eventExpenses)
     .where(eq(eventExpenses.eventId, eventId));
-  const totalExpense = Number(expenseResult?.total ?? 0);
+  const baseExpense = Number(expenseResult?.total ?? 0);
+
+  const refundEnabled = event.status === 'cancelled' && (event.isPaid || event.isDonation);
+  let totalRefunded = 0;
+  let refundOutflow = 0;
+  let paidRefundCases = 0;
+
+  // Refund outflow applies only for cancelled paid events.
+  if (refundEnabled) {
+    const [refundResult] = await db
+      .select({
+        refundedAmount: sum(refundRequests.refundAmount),
+        paidCount: count(),
+      })
+      .from(refundRequests)
+      .where(
+        and(
+          eq(refundRequests.eventId, eventId),
+          or(eq(refundRequests.status, 'paid'), eq(refundRequests.status, 'confirmed')),
+        ),
+      );
+
+    totalRefunded = Number(refundResult?.refundedAmount ?? 0);
+    refundOutflow = totalRefunded;
+    paidRefundCases = refundResult?.paidCount ?? 0;
+  }
+
+  // Final expense includes regular event expenses + refund outflow
+  const totalExpense = baseExpense + refundOutflow;
 
   // Club subsidy = how much the club had to put in from its own budget
   const clubSubsidy = Math.max(0, totalExpense - totalRevenue);
@@ -1628,6 +1671,10 @@ export const getEventFinancials = async (eventId: number) => {
     estimatedBudget: event.estimatedBudget ?? 0,
     allocatedBudget: event.allocatedBudget ?? 0,
     totalRevenue,
+    baseExpense,
+    totalRefunded,
+    refundOutflow,
+    paidRefundCases,
     totalExpense,
     clubSubsidy,
     netAmount,
