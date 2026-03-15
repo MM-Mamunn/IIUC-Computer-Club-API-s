@@ -11,7 +11,7 @@ import {
 } from '../../db/event.schema';
 import { createRefundCasesForEvent } from '../refund/refund.service';
 import { users, committee } from '../../db/schema';
-import { eq, desc, and, or, count, sum, sql, lte } from 'drizzle-orm';
+import { eq, ne, desc, and, or, count, sum, sql, lte } from 'drizzle-orm';
 import { HTTPException } from 'hono/http-exception';
 import type { Context } from 'hono';
 import { hashPassword } from '../../utils/hash';
@@ -23,6 +23,12 @@ import {
   sendPaymentRejectionEmail,
 } from '../../utils/email';
 import { generateToken, verifyToken } from '../../utils/jwt';
+
+function invalidateEventCaches() {
+  invalidate('events:');
+  invalidate('dashboard:');
+  invalidate('president:');
+}
 
 // ─── Create Event ───
 export const createEvent = async (
@@ -44,6 +50,7 @@ export const createEvent = async (
     estimatedBudget?: number;
     allocatedBudget?: number;
     genderRestriction?: string;
+    isFeatured?: boolean;
   },
   c: Context,
 ) => {
@@ -60,30 +67,39 @@ export const createEvent = async (
     throw new HTTPException(400, { message: 'Gender restriction must be male, female, or both' });
   }
 
-  const [event] = await db
-    .insert(events)
-    .values({
-      title: data.title,
-      description: data.description ?? null,
-      committeeNumber: data.committeeNumber,
-      eventDate: new Date(data.eventDate),
-      registrationDeadline: data.registrationDeadline ? new Date(data.registrationDeadline) : null,
-      venue: data.venue ?? null,
-      isPaid: data.isPaid ?? false,
-      isDonation: data.isDonation ?? false,
-      fee: data.fee ?? 0,
-      maxParticipants: data.maxParticipants ?? null,
-      bannerImage: data.bannerImage ?? null,
-      status: 'upcoming',
-      paymentNumbers: data.paymentNumbers ?? null,
-      sslcommerzEnabled: data.sslcommerzEnabled ?? false,
-      customFields: data.customFields ?? null,
-      createdBy: user.id,
-      estimatedBudget: data.estimatedBudget ?? 0,
-      allocatedBudget: data.allocatedBudget ?? 0,
-      genderRestriction,
-    })
-    .returning();
+  const [event] = await db.transaction(async (tx) => {
+    if (data.isFeatured) {
+      await tx.update(events).set({ isFeatured: false }).where(eq(events.isFeatured, true));
+    }
+
+    return tx
+      .insert(events)
+      .values({
+        title: data.title,
+        description: data.description ?? null,
+        committeeNumber: data.committeeNumber,
+        eventDate: new Date(data.eventDate),
+        registrationDeadline: data.registrationDeadline
+          ? new Date(data.registrationDeadline)
+          : null,
+        venue: data.venue ?? null,
+        isPaid: data.isPaid ?? false,
+        isDonation: data.isDonation ?? false,
+        fee: data.fee ?? 0,
+        maxParticipants: data.maxParticipants ?? null,
+        bannerImage: data.bannerImage ?? null,
+        status: 'upcoming',
+        paymentNumbers: data.paymentNumbers ?? null,
+        sslcommerzEnabled: data.sslcommerzEnabled ?? false,
+        customFields: data.customFields ?? null,
+        createdBy: user.id,
+        estimatedBudget: data.estimatedBudget ?? 0,
+        allocatedBudget: data.allocatedBudget ?? 0,
+        genderRestriction,
+        isFeatured: data.isFeatured ?? false,
+      })
+      .returning();
+  });
 
   return event;
 };
@@ -142,6 +158,7 @@ export const listEvents = (committeeNumber?: string, status?: string, gender?: s
           maxParticipants: events.maxParticipants,
           bannerImage: events.bannerImage,
           status: events.status,
+          isFeatured: events.isFeatured,
           paymentNumbers: events.paymentNumbers,
           sslcommerzEnabled: events.sslcommerzEnabled,
           customFields: events.customFields,
@@ -149,6 +166,10 @@ export const listEvents = (committeeNumber?: string, status?: string, gender?: s
           estimatedBudget: events.estimatedBudget,
           genderRestriction: events.genderRestriction,
           createdAt: events.createdAt,
+          registrationCount:
+            sql<number>`(select count(*)::int from event_registrations er where er.event_id = ${events.id})`.as(
+              'registrationCount',
+            ),
         })
         .from(events)
         .innerJoin(committee, eq(events.committeeNumber, committee.number))
@@ -163,7 +184,41 @@ export const listEvents = (committeeNumber?: string, status?: string, gender?: s
       return query;
     }
 
-    let query = db.select().from(events).orderBy(desc(events.eventDate)).$dynamic();
+    let query = db
+      .select({
+        id: events.id,
+        title: events.title,
+        description: events.description,
+        committeeNumber: events.committeeNumber,
+        eventDate: events.eventDate,
+        registrationDeadline: events.registrationDeadline,
+        venue: events.venue,
+        isPaid: events.isPaid,
+        isDonation: events.isDonation,
+        fee: events.fee,
+        maxParticipants: events.maxParticipants,
+        bannerImage: events.bannerImage,
+        status: events.status,
+        isFeatured: events.isFeatured,
+        paymentNumbers: events.paymentNumbers,
+        sslcommerzEnabled: events.sslcommerzEnabled,
+        customFields: events.customFields,
+        createdBy: events.createdBy,
+        estimatedBudget: events.estimatedBudget,
+        allocatedBudget: events.allocatedBudget,
+        financesLocked: events.financesLocked,
+        financesLockedBy: events.financesLockedBy,
+        financesLockedAt: events.financesLockedAt,
+        genderRestriction: events.genderRestriction,
+        createdAt: events.createdAt,
+        registrationCount:
+          sql<number>`(select count(*)::int from event_registrations er where er.event_id = ${events.id})`.as(
+            'registrationCount',
+          ),
+      })
+      .from(events)
+      .orderBy(desc(events.eventDate))
+      .$dynamic();
 
     const conditions = [];
     if (committeeNumber) conditions.push(eq(events.committeeNumber, committeeNumber));
@@ -216,6 +271,7 @@ export const updateEvent = async (id: number, data: Record<string, unknown>) => 
     'allocatedBudget',
     'genderRestriction',
     'committeeNumber',
+    'isFeatured',
   ]);
 
   const updateData: Record<string, unknown> = {};
@@ -233,7 +289,16 @@ export const updateEvent = async (id: number, data: Record<string, unknown>) => 
     throw new HTTPException(400, { message: 'No fields to update' });
   }
 
-  const [updated] = await db.update(events).set(updateData).where(eq(events.id, id)).returning();
+  const [updated] = await db.transaction(async (tx) => {
+    if (updateData.isFeatured === true) {
+      await tx
+        .update(events)
+        .set({ isFeatured: false })
+        .where(and(eq(events.isFeatured, true), ne(events.id, id)));
+    }
+
+    return tx.update(events).set(updateData).where(eq(events.id, id)).returning();
+  });
 
   // Auto-create refund cases only for cancelled paid events.
   const nextStatus = (updateData.status as string | undefined) ?? existing.status;
@@ -345,6 +410,8 @@ export const registerForEvent = async (
       customFieldResponses: customFieldResponses ?? null,
     })
     .returning();
+
+  invalidateEventCaches();
 
   // Send registration confirmation email (async, don't block)
   const [regUser] = await db
@@ -508,6 +575,8 @@ export const guestRegisterForEvent = async (
     })
     .returning();
 
+  invalidateEventCaches();
+
   // Generate JWT token for auto-login
   const token = generateToken({
     id: studentId,
@@ -561,6 +630,8 @@ export const submitPayment = async (
     .set({ paymentMethod, transactionId, paymentStatus: 'pending' })
     .where(and(eq(eventRegistrations.eventId, eventId), eq(eventRegistrations.userId, userId)))
     .returning();
+
+  invalidateEventCaches();
 
   return updated;
 };
@@ -694,6 +765,8 @@ export const fixPayment = async (
       )
       .returning();
 
+    invalidateEventCaches();
+
     return updated;
   } else {
     // incorrect_amount or other — need full payment details
@@ -724,6 +797,8 @@ export const fixPayment = async (
         and(eq(eventRegistrations.eventId, eventId), eq(eventRegistrations.userId, payload.id)),
       )
       .returning();
+
+    invalidateEventCaches();
 
     return updated;
   }
@@ -757,6 +832,8 @@ export const verifyPayment = async (
       })
       .where(and(eq(eventRegistrations.eventId, eventId), eq(eventRegistrations.userId, userId)))
       .returning();
+
+    invalidateEventCaches();
 
     const [user] = await db.select().from(users).where(eq(users.id, userId));
     const [event] = await db.select().from(events).where(eq(events.id, eventId));
@@ -880,6 +957,8 @@ export const verifySslcommerzPayment = async (tranId: string, valId: string) => 
     )
     .returning();
 
+  invalidateEventCaches();
+
   // Send confirmation email
   const [user] = await db.select().from(users).where(eq(users.id, reg.userId));
   const [event] = await db.select().from(events).where(eq(events.id, reg.eventId));
@@ -905,6 +984,8 @@ export const setSslcommerzTranId = async (eventId: number, userId: string, tranI
     .set({ sslcommerzTranId: tranId, paymentMethod: 'sslcommerz', paymentStatus: 'pending' })
     .where(and(eq(eventRegistrations.eventId, eventId), eq(eventRegistrations.userId, userId)))
     .returning();
+
+  invalidateEventCaches();
 
   return updated;
 };
@@ -985,6 +1066,8 @@ export const unregisterFromEvent = async (eventId: number, userId: string) => {
   await db
     .delete(eventRegistrations)
     .where(and(eq(eventRegistrations.eventId, eventId), eq(eventRegistrations.userId, userId)));
+
+  invalidateEventCaches();
 
   return { success: true, message: 'Unregistered successfully' };
 };

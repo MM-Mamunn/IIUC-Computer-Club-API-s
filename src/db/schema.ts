@@ -36,6 +36,8 @@ export const committee = pgTable('committee', {
 
   start: date('start').notNull(),
 
+  session: varchar('session', { length: 100 }).notNull(),
+
   end: date('end'),
 
   beginningBudget: doublePrecision('beginning_budget'),

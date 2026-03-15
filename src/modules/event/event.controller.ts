@@ -67,6 +67,7 @@ export const create = async (c: Context) => {
         ? Number(formData.get('maxParticipants'))
         : undefined,
       sslcommerzEnabled: formData.get('sslcommerzEnabled') === 'true',
+      isFeatured: formData.get('isFeatured') === 'true',
       estimatedBudget: formData.get('estimatedBudget')
         ? Number(formData.get('estimatedBudget'))
         : 0,
@@ -157,6 +158,10 @@ export const update = async (c: Context) => {
         continue;
       }
       if (key === 'isPaid' || key === 'sslcommerzEnabled' || key === 'isDonation') {
+        data[key] = value === 'true';
+        continue;
+      }
+      if (key === 'isFeatured') {
         data[key] = value === 'true';
         continue;
       }

@@ -317,6 +317,9 @@ async function seedMassive() {
         number: c.number,
         gender: c.gender,
         start: c.start,
+        session: c.number.endsWith('F')
+          ? `${c.number.slice(0, -1)} Session`
+          : `${c.number} Session`,
         end: c.end,
         beginningBudget: c.budget,
         description: `IIUC CC ${c.number} (${c.gender})`,

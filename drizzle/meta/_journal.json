@@ -148,6 +148,13 @@
       "when": 1773433683614,
       "tag": "0020_round_clint_barton",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1773625000000,
+      "tag": "0021_event_featured_and_committee_session",
+      "breakpoints": true
     }
   ]
 }

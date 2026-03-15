@@ -59,6 +59,9 @@ export const events = pgTable('events', {
   /** Event status */
   status: varchar('status', { length: 20 }).notNull().default('upcoming'),
 
+  /** Whether this event should be highlighted on public pages */
+  isFeatured: boolean('is_featured').notNull().default(false),
+
   /**
    * Manual payment numbers for bKash / Nagad.
    * Stored as JSON: { bkash: string[], nagad: string[] }

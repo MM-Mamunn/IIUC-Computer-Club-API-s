@@ -9,12 +9,13 @@ import { cached, invalidate } from '../../utils/cache';
 export const addCommittee = async (
   number: string,
   start: string,
+  session: string,
   beginningBudget: number,
   description: string | null,
 ) => {
-  if (!number || !start) {
+  if (!number || !start || !session) {
     throw new HTTPException(400, {
-      message: 'number and start are required',
+      message: 'number, start, and session are required',
     });
   }
   if (isNaN(Date.parse(start))) {
@@ -68,6 +69,7 @@ export const addCommittee = async (
     .values({
       number,
       start,
+      session,
       gender: 'male',
       end: null,
       beginningBudget,
@@ -78,6 +80,7 @@ export const addCommittee = async (
   await db.insert(committee).values({
     number: femaleNumber,
     start,
+    session,
     gender: 'female',
     end: null,
     beginningBudget: null,
@@ -99,6 +102,7 @@ export const showActive = () =>
         number: committee.number,
         gender: committee.gender,
         start: committee.start,
+        session: committee.session,
         end: committee.end,
         description: committee.description,
         beginningBudget: committee.beginningBudget,
@@ -123,6 +127,7 @@ export const showAllCommittees = () =>
         number: committee.number,
         gender: committee.gender,
         start: committee.start,
+        session: committee.session,
         end: committee.end,
         description: committee.description,
         beginningBudget: committee.beginningBudget,

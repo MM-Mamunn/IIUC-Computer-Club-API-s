@@ -12,6 +12,7 @@ import {
 type CommitteeBody = {
   number: string;
   start: string;
+  session: string;
   beginningBudget: number;
   description?: string | null;
 };
@@ -22,6 +23,7 @@ export const newCommittee = async (c: Context) => {
   const committee = await addCommittee(
     body.number,
     body.start,
+    body.session,
     body.beginningBudget,
     body.description ?? null,
   );
