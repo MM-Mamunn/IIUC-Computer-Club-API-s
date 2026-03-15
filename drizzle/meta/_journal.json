@@ -155,6 +155,13 @@
       "when": 1773625000000,
       "tag": "0021_event_featured_and_committee_session",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1773610116592,
+      "tag": "0022_glamorous_marten_broadcloak",
+      "breakpoints": true
     }
   ]
 }
