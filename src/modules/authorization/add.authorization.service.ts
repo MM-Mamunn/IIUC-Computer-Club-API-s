@@ -233,6 +233,53 @@ export const addSecretaries = async (
   return newSec;
 };
 
+// FUNCTION TO ADD EXECUTIVE MEMBER
+export const addExecutiveMember = async (id: string, number: string, c: Context) => {
+  const user = c.get('user');
+  await assertCommitteeOpen(number);
+
+  const role = 'executive member';
+  const position = 'executive member';
+
+  const roles = await getRolesByPriorityRange(7, 7);
+  if (!roles.includes(role)) {
+    throw new HTTPException(409, {
+      message: `Role ${role} is not configured. Please run latest migrations/seeds.`,
+    });
+  }
+
+  const existing = await db
+    .select()
+    .from(executives)
+    .where(and(eq(executives.number, number), eq(executives.role, role), eq(executives.id, id)));
+  if (existing.length > 0) {
+    throw new HTTPException(409, {
+      message: `User ${id} is already an executive member in committee ${number}`,
+    });
+  }
+
+  const [newExecutive] = await db
+    .insert(executives)
+    .values({
+      id,
+      number,
+      role,
+      position,
+      assignedBy: user.id,
+    })
+    .onConflictDoUpdate({
+      target: [executives.id, executives.number],
+      set: {
+        role,
+        position,
+        assignedBy: user.id,
+      },
+    })
+    .returning();
+
+  return newExecutive;
+};
+
 // FUNCTION TO ADD GENERAL SECRETARY
 export const deleteMember = async (id: string, number: string, c: Context) => {
   const user = c.get('user');

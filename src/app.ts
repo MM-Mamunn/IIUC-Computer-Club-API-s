@@ -7,6 +7,7 @@ import userRoutes from './modules/user/user.routes';
 import committeeRoutes from './modules/committee/committee.routes';
 import eventRoutes from './modules/event/event.routes';
 import refundRoutes from './modules/refund/refund.routes';
+import newsletterRoutes from './modules/newsletter/newsletter.routes';
 import general from './modules/general/general.routes';
 import { invalidate } from './utils/cache';
 
@@ -82,6 +83,7 @@ app.route('/api/authorization', authorizationRoutes);
 app.route('/api/committee', committeeRoutes);
 app.route('/api/events', eventRoutes);
 app.route('/api/refunds', refundRoutes);
+app.route('/api/newsletter', newsletterRoutes);
 
 /**
  * Global error handler — returns clean, user-friendly messages.

@@ -5,6 +5,7 @@ import {
   addAsstGeneralSecretary,
   addGeneralSecretary,
   addSecretaries,
+  addExecutiveMember,
   deleteMember,
 } from './add.authorization.service';
 import { genderMatch, assertNoHigherRole } from '../global/global.service';
@@ -49,6 +50,15 @@ export const addSec = async (c: Context) => {
   const addsec = await addSecretaries(id.toUpperCase(), position, role, number, c);
   return c.json(addsec, 200);
 };
+
+export const addExec = async (c: Context) => {
+  const { id, number } = await c.req.json();
+  await genderMatch(id.toUpperCase(), number);
+  await assertNoHigherRole(id.toUpperCase(), number, 'executive member');
+  const addexec = await addExecutiveMember(id.toUpperCase(), number, c);
+  return c.json(addexec, 200);
+};
+
 export const delMem = async (c: Context) => {
   const { id, number } = await c.req.json();
 
