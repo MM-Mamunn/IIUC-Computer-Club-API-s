@@ -4,6 +4,7 @@ import { eq, and, or } from 'drizzle-orm';
 import { HTTPException } from 'hono/http-exception';
 import type { Context } from 'hono';
 import { assertCommitteeOpen, getRolesByPriorityRange } from '../global/global.service';
+import { invalidate } from '../../utils/cache';
 import { log } from 'node:console';
 
 // FUNCTIONS TO ADD VICE PRESIDENT
@@ -49,6 +50,8 @@ export const addVicePresident = async (id: string, role: string, number: string,
       },
     })
     .returning();
+  invalidate('committee:members:');
+  invalidate('president:');
   return newVP;
 };
 
@@ -83,6 +86,8 @@ export const addTreasurer = async (id: string, number: string, c: Context) => {
       },
     })
     .returning();
+  invalidate('committee:members:');
+  invalidate('president:');
   return newTrsr;
 };
 
@@ -118,6 +123,8 @@ export const addGeneralSecretary = async (id: string, number: string, c: Context
       },
     })
     .returning();
+  invalidate('committee:members:');
+  invalidate('president:');
   return newGS;
 };
 
@@ -164,6 +171,8 @@ export const addAsstGeneralSecretary = async (
     })
     .returning();
   log('new AGS is', newAGS);
+  invalidate('committee:members:');
+  invalidate('president:');
   return newAGS;
 };
 
@@ -230,6 +239,8 @@ export const addSecretaries = async (
       },
     })
     .returning();
+  invalidate('committee:members:');
+  invalidate('president:');
   return newSec;
 };
 
@@ -277,6 +288,9 @@ export const addExecutiveMember = async (id: string, number: string, c: Context)
     })
     .returning();
 
+  invalidate('committee:members:');
+  invalidate('president:');
+
   return newExecutive;
 };
 
@@ -296,6 +310,9 @@ export const deleteMember = async (id: string, number: string, c: Context) => {
   const [del] = await db
     .delete(executives)
     .where(and(eq(executives.id, id), eq(executives.number, number)));
+
+  invalidate('committee:members:');
+  invalidate('president:');
 
   return { success: true, message: 'Member deleted successfully' };
 };
