@@ -564,7 +564,7 @@ async function seed() {
     .insert(committee)
     .values([
       {
-        number: '2026',
+        number: 'Autumn 2026',
         gender: 'male',
         start: '2026-01-01',
         session: 'Autumn 2025 - Spring 2026',
@@ -573,7 +573,7 @@ async function seed() {
         description: 'IIUC Computer Club Committee 2026 (Male)',
       },
       {
-        number: '2026F',
+        number: 'Autumn 2026 Female',
         gender: 'female',
         start: '2026-01-01',
         session: 'Autumn 2025 - Spring 2026',
