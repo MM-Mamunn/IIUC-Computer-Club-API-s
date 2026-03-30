@@ -6,12 +6,13 @@ export const search = async (c: Context) => {
   const query = c.req.query('q') || '';
   const committeeNumber = c.req.query('committee') || undefined;
   const filterByRole = c.req.query('filterByRole') === 'true';
+  const executivesOnly = c.req.query('executivesOnly') === 'true';
   if (query.length < 1) {
     throw new HTTPException(400, { message: 'Search query (q) is required' });
   }
   // When filterByRole is true, pass the caller's role to filter out equal/higher-priority users
   const callerRole = filterByRole ? (c.get('user')?.role as string | undefined) : undefined;
-  const results = await searchUsers(query, committeeNumber, callerRole);
+  const results = await searchUsers(query, committeeNumber, callerRole, executivesOnly);
   return c.json({ users: results }, 200);
 };
 

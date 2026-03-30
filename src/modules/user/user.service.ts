@@ -6,7 +6,7 @@ import { eq, and, ilike, or, count, isNull, sum, inArray } from 'drizzle-orm';
 import { cached } from '../../utils/cache';
 
 // ─── Search Users ───
-export const searchUsers = async (query: string, committeeNumber?: string, callerRole?: string) => {
+export const searchUsers = async (query: string, committeeNumber?: string, callerRole?: string, executivesOnly?: boolean) => {
   const results = await db
     .select({
       id: users.id,
@@ -82,6 +82,14 @@ export const searchUsers = async (query: string, committeeNumber?: string, calle
         return p != null && p <= callerPriority;
       });
       return !hasHigherOrEqualRole;
+    });
+  }
+
+  // If executivesOnly is true, filter out users who are NOT in any active committee
+  if (executivesOnly) {
+    filteredResults = filteredResults.filter((u) => {
+      const execRoles = execByUser.get(u.id);
+      return execRoles && execRoles.length > 0;
     });
   }
 
