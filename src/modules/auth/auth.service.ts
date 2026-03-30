@@ -1,6 +1,6 @@
 import { db } from '../../config/db';
 import { executives, users } from '../../db/schema';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, desc } from 'drizzle-orm';
 import { hashPassword, comparePassword } from '../../utils/hash';
 import { generateToken } from '../../utils/jwt';
 import { HTTPException } from 'hono/http-exception';
@@ -66,12 +66,37 @@ export const loginUser = async (id: string, password: string) => {
     .select()
     .from(executives)
     .where(and(eq(executives.id, id), inArray(executives.number, activeNumbers)));
+    
+  let role = pos?.role ?? 'student';
+  let position = pos?.position ?? '';
+  let committeeNumber = pos?.number ?? '';
+
+  if (!pos) {
+    const [latestExecutive] = await db
+      .select({
+         role: executives.role,
+         position: executives.position,
+         number: executives.number
+      })
+      .from(executives)
+      // We need to import committee to join it
+      .where(and(eq(executives.id, id), eq(executives.role, 'president')))
+      .orderBy(desc(executives.number))
+      .limit(1);
+
+    if (latestExecutive) {
+      role = 'president';
+      position = latestExecutive.position ?? '';
+      committeeNumber = latestExecutive.number;
+    }
+  }
+
   const token = generateToken({
     id: user.id,
-    role: pos?.role ?? 'student',
-    position: pos?.position ?? '',
+    role,
+    position,
     gender: user.gender,
-    committeeNumber: pos?.number ?? '',
+    committeeNumber,
     mustChangePassword: user.mustChangePassword ?? false,
   });
 
@@ -100,12 +125,35 @@ export const refreshToken = async (c: Context) => {
         .where(and(eq(executives.id, user.id), inArray(executives.number, activeNumbers)))
     : [];
 
+  let role = pos?.role ?? 'student';
+  let position = pos?.position ?? '';
+  let committeeNumber = pos?.number ?? '';
+
+  if (!pos) {
+    const [latestExecutive] = await db
+      .select({
+         role: executives.role,
+         position: executives.position,
+         number: executives.number
+      })
+      .from(executives)
+      .where(and(eq(executives.id, user.id), eq(executives.role, 'president')))
+      .orderBy(desc(executives.number))
+      .limit(1);
+
+    if (latestExecutive) {
+      role = 'president';
+      position = latestExecutive.position ?? '';
+      committeeNumber = latestExecutive.number;
+    }
+  }
+
   const token = generateToken({
     id: user.id,
-    role: pos?.role ?? 'student',
-    position: pos?.position ?? '',
+    role,
+    position,
     gender: user.gender,
-    committeeNumber: pos?.number ?? '',
+    committeeNumber,
     mustChangePassword: user.mustChangePassword ?? false,
   });
 

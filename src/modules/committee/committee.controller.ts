@@ -19,6 +19,7 @@ type CommitteeBody = {
 
 export const newCommittee = async (c: Context) => {
   const body = (await c.req.json()) as CommitteeBody;
+  const user = c.get('user');
 
   const committee = await addCommittee(
     body.number,
@@ -26,6 +27,7 @@ export const newCommittee = async (c: Context) => {
     body.session,
     body.beginningBudget,
     body.description ?? null,
+    user.id
   );
 
   return c.json({ committee }, 201);

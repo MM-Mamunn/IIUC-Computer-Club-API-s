@@ -12,6 +12,7 @@ export const addCommittee = async (
   session: string,
   beginningBudget: number,
   description: string | null,
+  userId: string,
 ) => {
   if (!number || !start || !session) {
     throw new HTTPException(400, {
@@ -33,7 +34,7 @@ export const addCommittee = async (
     });
   }
 
-  const femaleNumber = `${number}F`;
+  const femaleNumber = `${number} Female`;
 
   // Check if any active committee already exists for either gender
   const activeCommittees = await db
@@ -86,6 +87,24 @@ export const addCommittee = async (
     beginningBudget: null,
     description: description ?? null,
   });
+
+  // Assign the creator as president of both committees
+  await db.insert(executives).values([
+    {
+      id: userId,
+      number: maleCommittee.number,
+      role: 'president',
+      position: 'president',
+      assignedBy: userId,
+    },
+    {
+      id: userId,
+      number: femaleNumber,
+      role: 'president',
+      position: 'president',
+      assignedBy: userId,
+    },
+  ]);
 
   // Invalidate committee + dashboard caches
   invalidate('committee:');
