@@ -44,7 +44,10 @@ export const events = pgTable('events', {
   /** Is it a paid event? */
   isPaid: boolean('is_paid').notNull().default(false),
 
-  /** Fee amount (0 if free) */
+  /** Is it a donation/charity event? (pay-what-you-want) */
+  isDonation: boolean('is_donation').notNull().default(false),
+
+  /** Fee amount (0 if free, suggested minimum if donation) */
   fee: doublePrecision('fee').default(0),
 
   /** Max participants (null = unlimited) */
@@ -55,6 +58,9 @@ export const events = pgTable('events', {
 
   /** Event status */
   status: varchar('status', { length: 20 }).notNull().default('upcoming'),
+
+  /** Whether this event should be highlighted on public pages */
+  isFeatured: boolean('is_featured').notNull().default(false),
 
   /**
    * Manual payment numbers for bKash / Nagad.
@@ -140,6 +146,9 @@ export const eventRegistrations = pgTable(
     /** Transaction ID submitted by user (manual payment) */
     transactionId: varchar('transaction_id', { length: 255 }),
 
+    /** Donation amount for charity events (user-chosen) */
+    donationAmount: doublePrecision('donation_amount'),
+
     /** SSLCommerz validation ID for auto-verification */
     sslcommerzValId: varchar('sslcommerz_val_id', { length: 255 }),
 
@@ -155,6 +164,21 @@ export const eventRegistrations = pgTable(
      * value can be string, string[], or number depending on field type.
      */
     customFieldResponses: jsonb('custom_field_responses'),
+
+    /** Latest rejection reason (when admin rejects payment) */
+    rejectionReason: varchar('rejection_reason', { length: 500 }),
+
+    /** Type of the latest rejection: incorrect_trxid | incorrect_amount | other */
+    rejectionType: varchar('rejection_type', { length: 30 }),
+
+    /**
+     * History of payment rejections.
+     * Stored as JSON array: [{ reason, type, rejectedAt, transactionId, paymentMethod, amountDeficit? }]
+     */
+    rejectionHistory: jsonb('rejection_history'),
+
+    /** Whether the fix-payment token has been used */
+    fixPaymentUsed: boolean('fix_payment_used').default(false),
   },
   (table) => ({
     pk: primaryKey({ columns: [table.eventId, table.userId] }),
@@ -356,3 +380,104 @@ export const vouchers = pgTable('vouchers', {
 
   generatedAt: timestamp('generated_at', { withTimezone: true }).defaultNow(),
 });
+
+/* =========================
+   REFUND REQUESTS TABLE
+   (Created when a paid event is cancelled — tracks full refund lifecycle)
+========================= */
+export const refundRequests = pgTable(
+  'refund_requests',
+  {
+    id: serial('id').primaryKey(),
+
+    eventId: integer('event_id')
+      .notNull()
+      .references(() => events.id, { onDelete: 'cascade', onUpdate: 'cascade' }),
+
+    userId: varchar('user_id', { length: 255 })
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade', onUpdate: 'cascade' }),
+
+    /** Full event fee — what the student will receive back */
+    refundAmount: doublePrecision('refund_amount').notNull(),
+
+    /**
+     * Gateway fee covered by the club as subsidy.
+     * bKash/Nagad send-money charge = ৳5, cash = ৳0.
+     * Set when student submits refund destination.
+     */
+    subsidyAmount: doublePrecision('subsidy_amount').notNull().default(0),
+
+    /** How the student originally paid: bkash | nagad | sslcommerz | cash | other */
+    originalPaymentMethod: varchar('original_payment_method', { length: 30 }),
+
+    /** Original transaction ID from registration */
+    originalTransactionId: varchar('original_transaction_id', { length: 255 }),
+
+    /** Chosen refund channel: bkash | nagad | cash | bank */
+    refundMethod: varchar('refund_method', { length: 30 }),
+
+    /** Wallet / bank account number for the refund */
+    refundAccountNumber: varchar('refund_account_number', { length: 255 }),
+
+    /** Name of the account holder */
+    refundAccountOwnerName: varchar('refund_account_owner_name', { length: 255 }),
+
+    /**
+     * True when the refund destination account belongs to someone other
+     * than the original payer (e.g. borrowed number).
+     */
+    isDifferentFromPayer: boolean('is_different_from_payer').notNull().default(false),
+
+    /** Student checked the "I confirm this destination" declaration */
+    studentDeclarationAccepted: boolean('student_declaration_accepted').notNull().default(false),
+
+    studentDeclarationAcceptedAt: timestamp('student_declaration_accepted_at', {
+      withTimezone: true,
+    }),
+
+    /**
+     * Refund lifecycle status:
+     * pending_destination → destination_submitted → approved | rejected
+     * approved → paid → confirmed
+     */
+    status: varchar('status', { length: 30 }).notNull().default('pending_destination'),
+
+    /** Executive who reviewed / approved / rejected the refund */
+    reviewedBy: varchar('reviewed_by', { length: 255 }).references(() => users.id, {
+      onDelete: 'set null',
+      onUpdate: 'cascade',
+    }),
+
+    reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+
+    /** Admin notes visible only to staff */
+    adminNotes: text('admin_notes'),
+
+    /** Reason for rejection (shown to student) */
+    rejectionReason: text('rejection_reason'),
+
+    /** Who executed the refund transfer */
+    processedBy: varchar('processed_by', { length: 255 }).references(() => users.id, {
+      onDelete: 'set null',
+      onUpdate: 'cascade',
+    }),
+
+    processedAt: timestamp('processed_at', { withTimezone: true }),
+
+    /** Transaction reference of the actual refund (bKash TrxID etc.) */
+    refundTransactionRef: varchar('refund_transaction_ref', { length: 255 }),
+
+    /** Proof upload URL (screenshot of transfer / signed cash receipt) */
+    proofUrl: text('proof_url'),
+
+    /** When the student confirmed they received the refund */
+    confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+  },
+  (table) => ({
+    uniq: uniqueIndex('refund_requests_event_user_uniq').on(table.eventId, table.userId),
+  }),
+);

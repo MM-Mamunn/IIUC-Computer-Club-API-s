@@ -7,18 +7,28 @@ import {
   eventExpenses,
   expenseClaims,
   vouchers,
+  refundRequests,
 } from '../../db/event.schema';
-import { users, committee } from '../../db/schema';
-import { eq, desc, and, or, count, sum } from 'drizzle-orm';
+import { createRefundCasesForEvent } from '../refund/refund.service';
+import { users, committee, executives } from '../../db/schema';
+import { eq, ne, desc, and, or, count, sum, sql, lte } from 'drizzle-orm';
 import { HTTPException } from 'hono/http-exception';
 import type { Context } from 'hono';
 import { hashPassword } from '../../utils/hash';
+import { cached, invalidate } from '../../utils/cache';
+import { assertCommitteeOpen } from '../global/global.service';
 import {
-  generateTempPassword,
-  sendWelcomeEmail,
   sendEventRegistrationEmail,
   sendPaymentConfirmedEmail,
+  sendPaymentRejectionEmail,
 } from '../../utils/email';
+import { generateToken, verifyToken } from '../../utils/jwt';
+
+function invalidateEventCaches() {
+  invalidate('events:');
+  invalidate('dashboard:');
+  invalidate('president:');
+}
 
 // ─── Create Event ───
 export const createEvent = async (
@@ -30,6 +40,7 @@ export const createEvent = async (
     registrationDeadline?: string;
     venue?: string;
     isPaid?: boolean;
+    isDonation?: boolean;
     fee?: number;
     maxParticipants?: number;
     bannerImage?: string;
@@ -39,6 +50,7 @@ export const createEvent = async (
     estimatedBudget?: number;
     allocatedBudget?: number;
     genderRestriction?: string;
+    isFeatured?: boolean;
   },
   c: Context,
 ) => {
@@ -47,43 +59,131 @@ export const createEvent = async (
     throw new HTTPException(400, { message: 'Title, committee, and event date are required' });
   }
 
+  await assertCommitteeOpen(data.committeeNumber);
+
   // Validate gender restriction
   const genderRestriction = data.genderRestriction ?? 'both';
   if (!['male', 'female', 'both'].includes(genderRestriction)) {
     throw new HTTPException(400, { message: 'Gender restriction must be male, female, or both' });
   }
 
-  const [event] = await db
-    .insert(events)
-    .values({
-      title: data.title,
-      description: data.description ?? null,
-      committeeNumber: data.committeeNumber,
-      eventDate: new Date(data.eventDate),
-      registrationDeadline: data.registrationDeadline ? new Date(data.registrationDeadline) : null,
-      venue: data.venue ?? null,
-      isPaid: data.isPaid ?? false,
-      fee: data.fee ?? 0,
-      maxParticipants: data.maxParticipants ?? null,
-      bannerImage: data.bannerImage ?? null,
-      status: 'upcoming',
-      paymentNumbers: data.paymentNumbers ?? null,
-      sslcommerzEnabled: data.sslcommerzEnabled ?? false,
-      customFields: data.customFields ?? null,
-      createdBy: user.id,
-      estimatedBudget: data.estimatedBudget ?? 0,
-      allocatedBudget: data.allocatedBudget ?? 0,
-      genderRestriction,
-    })
-    .returning();
+  const [event] = await db.transaction(async (tx) => {
+    if (data.isFeatured) {
+      await tx.update(events).set({ isFeatured: false }).where(eq(events.isFeatured, true));
+    }
+
+    return tx
+      .insert(events)
+      .values({
+        title: data.title,
+        description: data.description ?? null,
+        committeeNumber: data.committeeNumber,
+        eventDate: new Date(data.eventDate),
+        registrationDeadline: data.registrationDeadline
+          ? new Date(data.registrationDeadline)
+          : null,
+        venue: data.venue ?? null,
+        isPaid: data.isPaid ?? false,
+        isDonation: data.isDonation ?? false,
+        fee: data.fee ?? 0,
+        maxParticipants: data.maxParticipants ?? null,
+        bannerImage: data.bannerImage ?? null,
+        status: 'upcoming',
+        paymentNumbers: data.paymentNumbers ?? null,
+        sslcommerzEnabled: data.sslcommerzEnabled ?? false,
+        customFields: data.customFields ?? null,
+        createdBy: user.id,
+        estimatedBudget: data.estimatedBudget ?? 0,
+        allocatedBudget: data.allocatedBudget ?? 0,
+        genderRestriction,
+        isFeatured: data.isFeatured ?? false,
+      })
+      .returning();
+  });
 
   return event;
 };
 
+// ─── Auto-update Event Statuses ───
+// Transitions: upcoming → ongoing (when eventDate passes), ongoing → completed (24h after eventDate)
+let lastAutoUpdate = 0;
+const AUTO_UPDATE_INTERVAL = 30_000; // Run at most every 30 seconds
+
+export const autoUpdateEventStatuses = async () => {
+  const now = Date.now();
+  if (now - lastAutoUpdate < AUTO_UPDATE_INTERVAL) return;
+  lastAutoUpdate = now;
+
+  const currentTime = new Date();
+  const ongoingCutoff = new Date(now - 24 * 60 * 60 * 1000); // 24h ago
+
+  // upcoming → ongoing: event date has passed
+  const toOngoing = await db
+    .update(events)
+    .set({ status: 'ongoing' })
+    .where(and(eq(events.status, 'upcoming'), lte(events.eventDate, currentTime)))
+    .returning({ id: events.id });
+
+  // ongoing → completed: 24h after event date
+  const toCompleted = await db
+    .update(events)
+    .set({ status: 'completed' })
+    .where(and(eq(events.status, 'ongoing'), lte(events.eventDate, ongoingCutoff)))
+    .returning({ id: events.id });
+
+  if (toOngoing.length > 0 || toCompleted.length > 0) {
+    invalidate('events:');
+    invalidate('dashboard:');
+    invalidate('president:');
+  }
+};
+
 // ─── List Events ───
-export const listEvents = async (committeeNumber?: string, status?: string, gender?: string) => {
-  if (gender) {
-    // Join with committee table to filter by gender
+export const listEvents = (committeeNumber?: string, status?: string, gender?: string) => {
+  const cacheKey = `events:list:${committeeNumber ?? ''}:${status ?? ''}:${gender ?? ''}`;
+  return cached(cacheKey, 15_000, async () => {
+    if (gender) {
+      let query = db
+        .select({
+          id: events.id,
+          title: events.title,
+          description: events.description,
+          committeeNumber: events.committeeNumber,
+          eventDate: events.eventDate,
+          registrationDeadline: events.registrationDeadline,
+          venue: events.venue,
+          isPaid: events.isPaid,
+          isDonation: events.isDonation,
+          fee: events.fee,
+          maxParticipants: events.maxParticipants,
+          bannerImage: events.bannerImage,
+          status: events.status,
+          isFeatured: events.isFeatured,
+          paymentNumbers: events.paymentNumbers,
+          sslcommerzEnabled: events.sslcommerzEnabled,
+          customFields: events.customFields,
+          createdBy: events.createdBy,
+          estimatedBudget: events.estimatedBudget,
+          genderRestriction: events.genderRestriction,
+          createdAt: events.createdAt,
+          registrationCount:
+            sql<number>`(select count(*)::int from event_registrations er where er.event_id = ${events.id})`.as(
+              'registrationCount',
+            ),
+        })
+        .from(events)
+        .innerJoin(committee, eq(events.committeeNumber, committee.number))
+        .orderBy(desc(events.eventDate))
+        .$dynamic();
+
+      const conditions = [or(eq(committee.gender, gender), eq(events.genderRestriction, 'both'))];
+      if (committeeNumber) conditions.push(eq(events.committeeNumber, committeeNumber));
+      if (status) conditions.push(eq(events.status, status));
+      query = query.where(and(...conditions));
+
+      return query;
+    }
+
     let query = db
       .select({
         id: events.id,
@@ -94,42 +194,42 @@ export const listEvents = async (committeeNumber?: string, status?: string, gend
         registrationDeadline: events.registrationDeadline,
         venue: events.venue,
         isPaid: events.isPaid,
+        isDonation: events.isDonation,
         fee: events.fee,
         maxParticipants: events.maxParticipants,
         bannerImage: events.bannerImage,
         status: events.status,
+        isFeatured: events.isFeatured,
         paymentNumbers: events.paymentNumbers,
         sslcommerzEnabled: events.sslcommerzEnabled,
         customFields: events.customFields,
         createdBy: events.createdBy,
         estimatedBudget: events.estimatedBudget,
+        allocatedBudget: events.allocatedBudget,
+        financesLocked: events.financesLocked,
+        financesLockedBy: events.financesLockedBy,
+        financesLockedAt: events.financesLockedAt,
         genderRestriction: events.genderRestriction,
         createdAt: events.createdAt,
+        registrationCount:
+          sql<number>`(select count(*)::int from event_registrations er where er.event_id = ${events.id})`.as(
+            'registrationCount',
+          ),
       })
       .from(events)
-      .innerJoin(committee, eq(events.committeeNumber, committee.number))
       .orderBy(desc(events.eventDate))
       .$dynamic();
 
-    const conditions = [or(eq(committee.gender, gender), eq(events.genderRestriction, 'both'))];
+    const conditions = [];
     if (committeeNumber) conditions.push(eq(events.committeeNumber, committeeNumber));
     if (status) conditions.push(eq(events.status, status));
-    query = query.where(and(...conditions));
+
+    if (conditions.length > 0) {
+      query = query.where(and(...conditions));
+    }
 
     return query;
-  }
-
-  let query = db.select().from(events).orderBy(desc(events.eventDate)).$dynamic();
-
-  const conditions = [];
-  if (committeeNumber) conditions.push(eq(events.committeeNumber, committeeNumber));
-  if (status) conditions.push(eq(events.status, status));
-
-  if (conditions.length > 0) {
-    query = query.where(and(...conditions));
-  }
-
-  return query;
+  });
 };
 
 // ─── Get Single Event with registration count ───
@@ -149,6 +249,7 @@ export const getEventById = async (id: number) => {
 export const updateEvent = async (id: number, data: Record<string, unknown>) => {
   const [existing] = await db.select().from(events).where(eq(events.id, id));
   if (!existing) throw new HTTPException(404, { message: 'Event not found' });
+  await assertCommitteeOpen(existing.committeeNumber);
 
   // Whitelist of allowed fields
   const allowed = new Set([
@@ -158,6 +259,7 @@ export const updateEvent = async (id: number, data: Record<string, unknown>) => 
     'registrationDeadline',
     'venue',
     'isPaid',
+    'isDonation',
     'fee',
     'maxParticipants',
     'bannerImage',
@@ -168,6 +270,8 @@ export const updateEvent = async (id: number, data: Record<string, unknown>) => 
     'estimatedBudget',
     'allocatedBudget',
     'genderRestriction',
+    'committeeNumber',
+    'isFeatured',
   ]);
 
   const updateData: Record<string, unknown> = {};
@@ -185,7 +289,29 @@ export const updateEvent = async (id: number, data: Record<string, unknown>) => 
     throw new HTTPException(400, { message: 'No fields to update' });
   }
 
-  const [updated] = await db.update(events).set(updateData).where(eq(events.id, id)).returning();
+  const [updated] = await db.transaction(async (tx) => {
+    if (updateData.isFeatured === true) {
+      await tx
+        .update(events)
+        .set({ isFeatured: false })
+        .where(and(eq(events.isFeatured, true), ne(events.id, id)));
+    }
+
+    return tx.update(events).set(updateData).where(eq(events.id, id)).returning();
+  });
+
+  // Auto-create refund cases only for cancelled paid events.
+  const nextStatus = (updateData.status as string | undefined) ?? existing.status;
+  const nextIsPaid = (updateData.isPaid as boolean | undefined) ?? existing.isPaid ?? false;
+  const nextIsDonation =
+    (updateData.isDonation as boolean | undefined) ?? existing.isDonation ?? false;
+
+  if (nextStatus === 'cancelled' && (nextIsPaid || nextIsDonation)) {
+    createRefundCasesForEvent(id).catch((err) =>
+      console.error('[Refund] Failed to create refund cases:', err),
+    );
+  }
+
   return updated;
 };
 
@@ -193,6 +319,7 @@ export const updateEvent = async (id: number, data: Record<string, unknown>) => 
 export const deleteEvent = async (id: number) => {
   const [existing] = await db.select().from(events).where(eq(events.id, id));
   if (!existing) throw new HTTPException(404, { message: 'Event not found' });
+  await assertCommitteeOpen(existing.committeeNumber);
 
   await db.delete(events).where(eq(events.id, id));
   return { success: true, message: 'Event deleted' };
@@ -205,6 +332,7 @@ export const registerForEvent = async (
   paymentMethod?: string,
   transactionId?: string,
   customFieldResponses?: unknown,
+  donationAmount?: number,
 ) => {
   const [event] = await db.select().from(events).where(eq(events.id, eventId));
   if (!event) throw new HTTPException(404, { message: 'Event not found' });
@@ -251,12 +379,21 @@ export const registerForEvent = async (
     throw new HTTPException(409, { message: 'You are already registered for this event' });
 
   // For paid events with manual payment, require transaction ID
-  if (event.isPaid && paymentMethod && paymentMethod !== 'sslcommerz' && !transactionId) {
+  // For donation events, require a donation amount > 0
+  if (event.isDonation) {
+    if (!donationAmount || donationAmount <= 0) {
+      throw new HTTPException(400, { message: 'Please enter a donation amount' });
+    }
+    if (paymentMethod && paymentMethod !== 'sslcommerz' && !transactionId) {
+      throw new HTTPException(400, { message: 'Transaction ID is required for manual payment' });
+    }
+  } else if (event.isPaid && paymentMethod && paymentMethod !== 'sslcommerz' && !transactionId) {
+    // For regular paid events, require transaction ID for manual payment
     throw new HTTPException(400, { message: 'Transaction ID is required for manual payment' });
   }
 
   let paymentStatus = 'free';
-  if (event.isPaid) {
+  if (event.isPaid || event.isDonation) {
     paymentStatus =
       paymentMethod === 'sslcommerz' ? 'pending' : transactionId ? 'pending' : 'pending';
   }
@@ -267,11 +404,14 @@ export const registerForEvent = async (
       eventId,
       userId,
       paymentStatus,
-      paymentMethod: event.isPaid ? (paymentMethod ?? null) : null,
+      paymentMethod: event.isPaid || event.isDonation ? (paymentMethod ?? null) : null,
       transactionId: transactionId ?? null,
+      donationAmount: event.isDonation ? (donationAmount ?? null) : null,
       customFieldResponses: customFieldResponses ?? null,
     })
     .returning();
+
+  invalidateEventCaches();
 
   // Send registration confirmation email (async, don't block)
   const [regUser] = await db
@@ -287,6 +427,7 @@ export const registerForEvent = async (
       event.venue,
       event.isPaid,
       event.fee ?? 0,
+      event.isDonation,
     );
   }
 
@@ -301,9 +442,11 @@ export const guestRegisterForEvent = async (
     email: string;
     name: string;
     gender: string;
+    password: string;
     customFieldResponses?: unknown;
     paymentMethod?: string;
     transactionId?: string;
+    donationAmount?: number;
   },
 ) => {
   // Validate gender
@@ -365,9 +508,12 @@ export const guestRegisterForEvent = async (
     });
   }
 
-  // Create account with temp password
-  const tempPassword = generateTempPassword();
-  const hashed = await hashPassword(tempPassword);
+  // Validate password
+  if (!data.password || data.password.length < 6) {
+    throw new HTTPException(400, { message: 'Password must be at least 6 characters' });
+  }
+
+  const hashed = await hashPassword(data.password);
 
   const [newUser] = await db
     .insert(users)
@@ -377,7 +523,7 @@ export const guestRegisterForEvent = async (
       email,
       password: hashed,
       gender: data.gender,
-      mustChangePassword: true,
+      mustChangePassword: false,
     })
     .returning();
 
@@ -394,17 +540,25 @@ export const guestRegisterForEvent = async (
 
   // Determine payment status
   let paymentStatus = 'free';
-  if (event.isPaid) {
+  if (event.isPaid || event.isDonation) {
     paymentStatus = 'pending';
   }
 
-  // For paid events with manual payment, require transaction ID
-  if (
+  // For donation events, require donation amount
+  if (event.isDonation) {
+    if (!data.donationAmount || data.donationAmount <= 0) {
+      throw new HTTPException(400, { message: 'Please enter a donation amount' });
+    }
+    if (data.paymentMethod && data.paymentMethod !== 'sslcommerz' && !data.transactionId) {
+      throw new HTTPException(400, { message: 'Transaction ID is required for manual payment' });
+    }
+  } else if (
     event.isPaid &&
     data.paymentMethod &&
     data.paymentMethod !== 'sslcommerz' &&
     !data.transactionId
   ) {
+    // For paid events with manual payment, require transaction ID
     throw new HTTPException(400, { message: 'Transaction ID is required for manual payment' });
   }
 
@@ -414,14 +568,26 @@ export const guestRegisterForEvent = async (
       eventId,
       userId: studentId,
       paymentStatus,
-      paymentMethod: event.isPaid ? (data.paymentMethod ?? null) : null,
+      paymentMethod: event.isPaid || event.isDonation ? (data.paymentMethod ?? null) : null,
       transactionId: data.transactionId ?? null,
+      donationAmount: event.isDonation ? (data.donationAmount ?? null) : null,
       customFieldResponses: data.customFieldResponses ?? null,
     })
     .returning();
 
-  // Send emails (async, don't block response)
-  sendWelcomeEmail(email, data.name.trim(), studentId, tempPassword);
+  invalidateEventCaches();
+
+  // Generate JWT token for auto-login
+  const token = generateToken({
+    id: studentId,
+    role: 'student',
+    position: '',
+    gender: data.gender,
+    committeeNumber: '',
+    mustChangePassword: false,
+  });
+
+  // Send event registration confirmation email (async, don't block response)
   sendEventRegistrationEmail(
     email,
     data.name.trim(),
@@ -430,9 +596,10 @@ export const guestRegisterForEvent = async (
     event.venue,
     event.isPaid,
     event.fee ?? 0,
+    event.isDonation,
   );
 
-  return { registration: reg, event };
+  return { registration: reg, event, token };
 };
 
 // ─── Submit Payment for existing registration ───
@@ -464,25 +631,210 @@ export const submitPayment = async (
     .where(and(eq(eventRegistrations.eventId, eventId), eq(eventRegistrations.userId, userId)))
     .returning();
 
+  invalidateEventCaches();
+
   return updated;
 };
 
+// ─── Get Fix Payment Details (public with token) ───
+export const getFixPaymentDetails = async (eventId: number, token: string) => {
+  let payload: { id: string; eventId: number; purpose: string };
+  try {
+    payload = verifyToken(token) as typeof payload;
+  } catch {
+    throw new HTTPException(401, { message: 'Invalid or expired fix-payment link' });
+  }
+
+  if (payload.purpose !== 'fix-payment' || payload.eventId !== eventId) {
+    throw new HTTPException(401, { message: 'Invalid fix-payment link' });
+  }
+
+  const [event] = await db.select().from(events).where(eq(events.id, eventId));
+  if (!event) throw new HTTPException(404, { message: 'Event not found' });
+
+  const [reg] = await db
+    .select()
+    .from(eventRegistrations)
+    .where(and(eq(eventRegistrations.eventId, eventId), eq(eventRegistrations.userId, payload.id)));
+  if (!reg) throw new HTTPException(404, { message: 'Registration not found' });
+
+  // If fix-payment was already used, link is invalid
+  if (reg.fixPaymentUsed) {
+    throw new HTTPException(400, {
+      message: 'This link has already been used. Your payment is being reviewed.',
+    });
+  }
+
+  const [user] = await db
+    .select({ name: users.name, email: users.email })
+    .from(users)
+    .where(eq(users.id, payload.id));
+
+  // Compute amount deficit for incorrect_amount rejections
+  let amountDeficit: number | undefined;
+  if (reg.rejectionType === 'incorrect_amount') {
+    // Check if admin specified a custom amount in the rejection history
+    const history = (reg.rejectionHistory as Array<{ amountDeficit?: number }>) ?? [];
+    const latestEntry = history.length > 0 ? history[history.length - 1] : null;
+    if (latestEntry?.amountDeficit && latestEntry.amountDeficit > 0) {
+      amountDeficit = latestEntry.amountDeficit;
+    } else if (!event.isDonation) {
+      const required = event.fee ?? 0;
+      const paid = reg.donationAmount ?? 0;
+      amountDeficit = required - paid;
+      if (amountDeficit <= 0) amountDeficit = undefined;
+    }
+  }
+
+  return {
+    event: {
+      id: event.id,
+      title: event.title,
+      eventDate: event.eventDate,
+      venue: event.venue,
+      fee: event.fee,
+      isPaid: event.isPaid,
+      isDonation: event.isDonation,
+      paymentNumbers: event.paymentNumbers,
+    },
+    registration: {
+      userId: payload.id,
+      paymentStatus: reg.paymentStatus,
+      rejectionReason: reg.rejectionReason,
+      rejectionType: reg.rejectionType,
+      donationAmount: reg.donationAmount,
+      amountDeficit,
+    },
+    user: user ? { name: user.name, email: user.email } : null,
+  };
+};
+
+// ─── Fix Payment (resubmit after rejection, public with token) ───
+export const fixPayment = async (
+  eventId: number,
+  token: string,
+  paymentMethod?: string,
+  transactionId?: string,
+  donationAmount?: number,
+  mfsNumber?: string,
+) => {
+  let payload: { id: string; eventId: number; purpose: string };
+  try {
+    payload = verifyToken(token) as typeof payload;
+  } catch {
+    throw new HTTPException(401, { message: 'Invalid or expired fix-payment link' });
+  }
+
+  if (payload.purpose !== 'fix-payment' || payload.eventId !== eventId) {
+    throw new HTTPException(401, { message: 'Invalid fix-payment link' });
+  }
+
+  const [reg] = await db
+    .select()
+    .from(eventRegistrations)
+    .where(and(eq(eventRegistrations.eventId, eventId), eq(eventRegistrations.userId, payload.id)));
+  if (!reg) throw new HTTPException(404, { message: 'Registration not found' });
+  if (reg.paymentStatus === 'verified')
+    throw new HTTPException(400, { message: 'Payment already verified' });
+  if (reg.fixPaymentUsed)
+    throw new HTTPException(400, {
+      message: 'This fix-payment link has already been used. Please contact the event organizers.',
+    });
+
+  const rejectionType = reg.rejectionType || 'other';
+
+  if (rejectionType === 'incorrect_trxid') {
+    // Only need a corrected transaction ID (and optional MFS number)
+    if (!transactionId || !transactionId.trim()) {
+      throw new HTTPException(400, { message: 'Please enter your correct Transaction ID' });
+    }
+
+    const updateData: Record<string, unknown> = {
+      transactionId: transactionId.trim(),
+      paymentStatus: 'pending',
+      rejectionReason: null,
+      rejectionType: null,
+      fixPaymentUsed: true,
+    };
+
+    const [updated] = await db
+      .update(eventRegistrations)
+      .set(updateData)
+      .where(
+        and(eq(eventRegistrations.eventId, eventId), eq(eventRegistrations.userId, payload.id)),
+      )
+      .returning();
+
+    invalidateEventCaches();
+
+    return updated;
+  } else {
+    // incorrect_amount or other — need full payment details
+    if (!paymentMethod || !transactionId) {
+      throw new HTTPException(400, {
+        message: 'Please select a payment method and enter your Transaction ID',
+      });
+    }
+
+    const updateData: Record<string, unknown> = {
+      paymentMethod,
+      transactionId: transactionId.trim(),
+      paymentStatus: 'pending',
+      rejectionReason: null,
+      rejectionType: null,
+      fixPaymentUsed: true,
+    };
+
+    // For donation events, update donation amount if provided
+    if (donationAmount && donationAmount > 0) {
+      updateData.donationAmount = donationAmount;
+    }
+
+    const [updated] = await db
+      .update(eventRegistrations)
+      .set(updateData)
+      .where(
+        and(eq(eventRegistrations.eventId, eventId), eq(eventRegistrations.userId, payload.id)),
+      )
+      .returning();
+
+    invalidateEventCaches();
+
+    return updated;
+  }
+};
+
 // ─── Verify Payment (admin) ───
-export const verifyPayment = async (eventId: number, userId: string, verified: boolean) => {
+export const verifyPayment = async (
+  eventId: number,
+  userId: string,
+  verified: boolean,
+  rejectionReason?: string,
+  frontendBaseUrl?: string,
+  rejectionType?: string,
+  correctAmount?: number,
+) => {
   const [reg] = await db
     .select()
     .from(eventRegistrations)
     .where(and(eq(eventRegistrations.eventId, eventId), eq(eventRegistrations.userId, userId)));
   if (!reg) throw new HTTPException(404, { message: 'Registration not found' });
 
-  const [updated] = await db
-    .update(eventRegistrations)
-    .set({ paymentStatus: verified ? 'verified' : 'failed' })
-    .where(and(eq(eventRegistrations.eventId, eventId), eq(eventRegistrations.userId, userId)))
-    .returning();
-
-  // Send confirmation email when verified
   if (verified) {
+    // Approve payment
+    const [updated] = await db
+      .update(eventRegistrations)
+      .set({
+        paymentStatus: 'verified',
+        rejectionReason: null,
+        rejectionType: null,
+        fixPaymentUsed: false,
+      })
+      .where(and(eq(eventRegistrations.eventId, eventId), eq(eventRegistrations.userId, userId)))
+      .returning();
+
+    invalidateEventCaches();
+
     const [user] = await db.select().from(users).where(eq(users.id, userId));
     const [event] = await db.select().from(events).where(eq(events.id, eventId));
     if (user?.email && event) {
@@ -493,11 +845,95 @@ export const verifyPayment = async (eventId: number, userId: string, verified: b
         event.eventDate.toISOString(),
         event.venue,
         event.fee ?? 0,
+        event.isDonation,
       );
     }
-  }
 
-  return updated;
+    return updated;
+  } else {
+    // Reject payment — store reason, type, and history
+    if (!rejectionReason || !rejectionReason.trim()) {
+      throw new HTTPException(400, { message: 'Please provide a reason for rejection' });
+    }
+
+    const validTypes = ['incorrect_trxid', 'incorrect_amount', 'other'];
+    const type = validTypes.includes(rejectionType ?? '') ? rejectionType! : 'other';
+
+    const [event] = await db.select().from(events).where(eq(events.id, eventId));
+
+    // For incorrect_amount, use admin-specified correctAmount if provided
+    let amountDeficit: number | undefined;
+    if (type === 'incorrect_amount' && event) {
+      if (correctAmount && correctAmount > 0) {
+        // Admin explicitly specified the amount the student needs to pay
+        amountDeficit = correctAmount;
+      } else if (event.isDonation) {
+        // For donation events, there's no fixed fee — admin specifies in the reason
+        amountDeficit = undefined;
+      } else {
+        const paid = reg.donationAmount ?? 0;
+        const required = event.fee ?? 0;
+        amountDeficit = required - paid;
+        if (amountDeficit <= 0) amountDeficit = undefined;
+      }
+    }
+
+    const existingHistory =
+      (reg.rejectionHistory as Array<{
+        reason: string;
+        type?: string;
+        rejectedAt: string;
+        transactionId: string | null;
+        paymentMethod: string | null;
+        amountDeficit?: number;
+      }>) ?? [];
+
+    const newHistoryEntry = {
+      reason: rejectionReason.trim(),
+      type,
+      rejectedAt: new Date().toISOString(),
+      transactionId: reg.transactionId,
+      paymentMethod: reg.paymentMethod,
+      ...(amountDeficit !== undefined ? { amountDeficit } : {}),
+    };
+
+    const [updated] = await db
+      .update(eventRegistrations)
+      .set({
+        paymentStatus: 'failed',
+        rejectionReason: rejectionReason.trim(),
+        rejectionType: type,
+        rejectionHistory: [...existingHistory, newHistoryEntry],
+        fixPaymentUsed: false,
+      })
+      .where(and(eq(eventRegistrations.eventId, eventId), eq(eventRegistrations.userId, userId)))
+      .returning();
+
+    // Send rejection email with fix-payment link
+    const [user] = await db.select().from(users).where(eq(users.id, userId));
+    if (user?.email && event) {
+      // Generate a JWT token for the fix-payment flow (valid for 7 days)
+      const fixToken = generateToken({ id: userId, eventId, purpose: 'fix-payment' }, '7d');
+      const baseUrl = frontendBaseUrl || process.env.FRONTEND_URL || 'http://localhost:3000';
+      const fixPaymentLink = `${baseUrl}/events/${eventId}/fix-payment?token=${fixToken}`;
+
+      sendPaymentRejectionEmail(
+        user.email,
+        user.name,
+        event.title,
+        event.eventDate.toISOString(),
+        event.venue,
+        rejectionReason.trim(),
+        fixPaymentLink,
+        event.fee ?? 0,
+        event.isDonation,
+        type,
+        amountDeficit,
+      );
+    }
+
+    return updated;
+  }
 };
 
 // ─── SSLCommerz: mark registration verified (called from IPN) ───
@@ -521,6 +957,8 @@ export const verifySslcommerzPayment = async (tranId: string, valId: string) => 
     )
     .returning();
 
+  invalidateEventCaches();
+
   // Send confirmation email
   const [user] = await db.select().from(users).where(eq(users.id, reg.userId));
   const [event] = await db.select().from(events).where(eq(events.id, reg.eventId));
@@ -532,6 +970,7 @@ export const verifySslcommerzPayment = async (tranId: string, valId: string) => 
       event.eventDate.toISOString(),
       event.venue,
       event.fee ?? 0,
+      event.isDonation,
     );
   }
 
@@ -545,6 +984,8 @@ export const setSslcommerzTranId = async (eventId: number, userId: string, tranI
     .set({ sslcommerzTranId: tranId, paymentMethod: 'sslcommerz', paymentStatus: 'pending' })
     .where(and(eq(eventRegistrations.eventId, eventId), eq(eventRegistrations.userId, userId)))
     .returning();
+
+  invalidateEventCaches();
 
   return updated;
 };
@@ -585,6 +1026,30 @@ export const getDraftData = async (eventId: number, userId: string) => {
 
 // ─── Unregister from Event ───
 export const unregisterFromEvent = async (eventId: number, userId: string) => {
+  const [event] = await db.select().from(events).where(eq(events.id, eventId));
+  if (!event) throw new HTTPException(404, { message: 'Event not found' });
+
+  // Block unregister after registration deadline, or on/after the event day if no deadline
+  const now = new Date();
+  if (event.registrationDeadline) {
+    if (new Date(event.registrationDeadline) < now) {
+      throw new HTTPException(400, {
+        message: 'Cannot unregister after the registration deadline has passed.',
+      });
+    }
+  } else {
+    // No deadline set — block on the event day
+    const eventDay = new Date(event.eventDate);
+    eventDay.setHours(0, 0, 0, 0);
+    const today = new Date(now);
+    today.setHours(0, 0, 0, 0);
+    if (today >= eventDay) {
+      throw new HTTPException(400, {
+        message: 'Cannot unregister on or after the event day.',
+      });
+    }
+  }
+
   const [existing] = await db
     .select()
     .from(eventRegistrations)
@@ -602,7 +1067,33 @@ export const unregisterFromEvent = async (eventId: number, userId: string) => {
     .delete(eventRegistrations)
     .where(and(eq(eventRegistrations.eventId, eventId), eq(eventRegistrations.userId, userId)));
 
+  invalidateEventCaches();
+
   return { success: true, message: 'Unregistered successfully' };
+};
+
+// ─── Get Registration Stats for all events (lightweight, single query) ───
+export const getRegistrationStats = async () => {
+  const rows = await db
+    .select({
+      eventId: eventRegistrations.eventId,
+      pending:
+        sql<number>`count(*) filter (where ${eventRegistrations.paymentStatus} = 'pending')`.as(
+          'pending',
+        ),
+      verified:
+        sql<number>`count(*) filter (where ${eventRegistrations.paymentStatus} = 'verified')`.as(
+          'verified',
+        ),
+    })
+    .from(eventRegistrations)
+    .groupBy(eventRegistrations.eventId);
+
+  const stats: Record<number, { pending: number; verified: number }> = {};
+  for (const row of rows) {
+    stats[row.eventId] = { pending: Number(row.pending), verified: Number(row.verified) };
+  }
+  return stats;
 };
 
 // ─── Get Event Registrations (admin) ───
@@ -617,7 +1108,10 @@ export const getEventRegistrations = async (eventId: number) => {
       paymentStatus: eventRegistrations.paymentStatus,
       paymentMethod: eventRegistrations.paymentMethod,
       transactionId: eventRegistrations.transactionId,
+      donationAmount: eventRegistrations.donationAmount,
       customFieldResponses: eventRegistrations.customFieldResponses,
+      rejectionReason: eventRegistrations.rejectionReason,
+      rejectionHistory: eventRegistrations.rejectionHistory,
     })
     .from(eventRegistrations)
     .innerJoin(users, eq(eventRegistrations.userId, users.id))
@@ -658,9 +1152,26 @@ export const assignDuty = async (
   const assigner = c.get('user');
   const [event] = await db.select().from(events).where(eq(events.id, eventId));
   if (!event) throw new HTTPException(404, { message: 'Event not found' });
+  await assertCommitteeOpen(event.committeeNumber);
 
   const [userExists] = await db.select().from(users).where(eq(users.id, userId));
   if (!userExists) throw new HTTPException(404, { message: 'User not found' });
+
+  // Guard: target user must be an executive in an active committee
+  const activeComms = await db
+    .select({ number: committee.number })
+    .from(committee)
+    .where(and(eq(committee.number, event.committeeNumber), sql`${committee.end} IS NULL`));
+  if (activeComms.length === 0) throw new HTTPException(400, { message: 'Committee is not active' });
+  const [isExec] = await db
+    .select()
+    .from(executives)
+    .where(and(eq(executives.id, userId), eq(executives.number, event.committeeNumber)));
+  if (!isExec) {
+    throw new HTTPException(403, {
+      message: 'Only executive members of this committee can be assigned duties',
+    });
+  }
 
   const [existing] = await db
     .select()
@@ -685,6 +1196,10 @@ export const assignDuty = async (
 
 // ─── Remove Duty ───
 export const removeDuty = async (eventId: number, userId: string, duty: string) => {
+  const [event] = await db.select().from(events).where(eq(events.id, eventId));
+  if (!event) throw new HTTPException(404, { message: 'Event not found' });
+  await assertCommitteeOpen(event.committeeNumber);
+
   const [existing] = await db
     .select()
     .from(eventDuties)
@@ -789,9 +1304,26 @@ export const isEventManager = async (eventId: number, userId: string): Promise<b
 export const addEventManager = async (eventId: number, userId: string, assignedBy: string) => {
   const [event] = await db.select().from(events).where(eq(events.id, eventId));
   if (!event) throw new HTTPException(404, { message: 'Event not found' });
+  await assertCommitteeOpen(event.committeeNumber);
 
   const [userExists] = await db.select().from(users).where(eq(users.id, userId));
   if (!userExists) throw new HTTPException(404, { message: 'User not found' });
+
+  // Guard: target user must be an executive in an active committee
+  const activeCommsForMgr = await db
+    .select({ number: committee.number })
+    .from(committee)
+    .where(and(eq(committee.number, event.committeeNumber), sql`${committee.end} IS NULL`));
+  if (activeCommsForMgr.length === 0) throw new HTTPException(400, { message: 'Committee is not active' });
+  const [isExecForMgr] = await db
+    .select()
+    .from(executives)
+    .where(and(eq(executives.id, userId), eq(executives.number, event.committeeNumber)));
+  if (!isExecForMgr) {
+    throw new HTTPException(403, {
+      message: 'Only executive members of this committee can be assigned as event managers',
+    });
+  }
 
   const [existing] = await db
     .select()
@@ -806,6 +1338,10 @@ export const addEventManager = async (eventId: number, userId: string, assignedB
 
 /** Remove a user as manager for a specific event. */
 export const removeEventManager = async (eventId: number, userId: string) => {
+  const [event] = await db.select().from(events).where(eq(events.id, eventId));
+  if (!event) throw new HTTPException(404, { message: 'Event not found' });
+  await assertCommitteeOpen(event.committeeNumber);
+
   const [existing] = await db
     .select()
     .from(eventManagers)
@@ -868,6 +1404,7 @@ export const addEventExpense = async (
 ) => {
   const [event] = await db.select().from(events).where(eq(events.id, eventId));
   if (!event) throw new HTTPException(404, { message: 'Event not found' });
+  await assertCommitteeOpen(event.committeeNumber);
   if (event.financesLocked) {
     throw new HTTPException(403, { message: 'Finances are locked for this event' });
   }
@@ -896,6 +1433,13 @@ export const updateEventExpense = async (
 ) => {
   const [existing] = await db.select().from(eventExpenses).where(eq(eventExpenses.id, expenseId));
   if (!existing) throw new HTTPException(404, { message: 'Expense not found' });
+
+  // Check committee closed
+  const [evtForClose] = await db
+    .select({ committeeNumber: events.committeeNumber })
+    .from(events)
+    .where(eq(events.id, existing.eventId));
+  if (evtForClose) await assertCommitteeOpen(evtForClose.committeeNumber);
 
   // Check lock
   const [evt] = await db
@@ -929,6 +1473,13 @@ export const updateEventExpense = async (
 export const deleteEventExpense = async (expenseId: number) => {
   const [existing] = await db.select().from(eventExpenses).where(eq(eventExpenses.id, expenseId));
   if (!existing) throw new HTTPException(404, { message: 'Expense not found' });
+
+  // Check committee closed
+  const [evtForClose] = await db
+    .select({ committeeNumber: events.committeeNumber })
+    .from(events)
+    .where(eq(events.id, existing.eventId));
+  if (evtForClose) await assertCommitteeOpen(evtForClose.committeeNumber);
 
   // Check lock
   const [evt] = await db
@@ -970,6 +1521,7 @@ export const submitExpenseClaim = async (
 ) => {
   const [event] = await db.select().from(events).where(eq(events.id, eventId));
   if (!event) throw new HTTPException(404, { message: 'Event not found' });
+  await assertCommitteeOpen(event.committeeNumber);
   if (event.financesLocked) {
     throw new HTTPException(403, { message: 'Finances are locked for this event' });
   }
@@ -1017,6 +1569,13 @@ export const reviewExpenseClaim = async (
     throw new HTTPException(400, { message: `Claim is already ${claim.status}` });
   }
 
+  // Check committee closed
+  const [evtForCommittee] = await db
+    .select({ committeeNumber: events.committeeNumber })
+    .from(events)
+    .where(eq(events.id, claim.eventId));
+  if (evtForCommittee) await assertCommitteeOpen(evtForCommittee.committeeNumber);
+
   // Check lock
   const [evt] = await db
     .select({ financesLocked: events.financesLocked })
@@ -1049,6 +1608,13 @@ export const markClaimPaid = async (
   if (claim.status !== 'approved') {
     throw new HTTPException(400, { message: 'Only approved claims can be marked as paid' });
   }
+
+  // Check committee closed
+  const [evtForCommittee] = await db
+    .select({ committeeNumber: events.committeeNumber })
+    .from(events)
+    .where(eq(events.id, claim.eventId));
+  if (evtForCommittee) await assertCommitteeOpen(evtForCommittee.committeeNumber);
 
   // Check lock
   const [evtForPay] = await db
@@ -1135,25 +1701,71 @@ export const getEventFinancials = async (eventId: number) => {
   const [event] = await db.select().from(events).where(eq(events.id, eventId));
   if (!event) throw new HTTPException(404, { message: 'Event not found' });
 
-  // Revenue: count of verified paid registrations × fee
-  const [revenueResult] = await db
-    .select({ count: count() })
-    .from(eventRegistrations)
-    .where(
-      and(
-        eq(eventRegistrations.eventId, eventId),
-        eq(eventRegistrations.paymentStatus, 'verified'),
-      ),
-    );
-  const verifiedCount = revenueResult?.count ?? 0;
-  const totalRevenue = event.isPaid ? verifiedCount * (event.fee ?? 0) : 0;
+  // Revenue calculation
+  let totalRevenue = 0;
+  let verifiedCount = 0;
+  if (event.isDonation) {
+    // For donation events: sum of verified donation amounts
+    const [donationResult] = await db
+      .select({ total: sum(eventRegistrations.donationAmount), count: count() })
+      .from(eventRegistrations)
+      .where(
+        and(
+          eq(eventRegistrations.eventId, eventId),
+          eq(eventRegistrations.paymentStatus, 'verified'),
+        ),
+      );
+    totalRevenue = Number(donationResult?.total ?? 0);
+    verifiedCount = donationResult?.count ?? 0;
+  } else if (event.isPaid) {
+    // For paid events: count of verified registrations × fee
+    const [revenueResult] = await db
+      .select({ count: count() })
+      .from(eventRegistrations)
+      .where(
+        and(
+          eq(eventRegistrations.eventId, eventId),
+          eq(eventRegistrations.paymentStatus, 'verified'),
+        ),
+      );
+    verifiedCount = revenueResult?.count ?? 0;
+    totalRevenue = verifiedCount * (event.fee ?? 0);
+  }
 
-  // Expenses: sum of all event expenses
+  // Base expenses: sum of all event expenses
   const [expenseResult] = await db
     .select({ total: sum(eventExpenses.amount) })
     .from(eventExpenses)
     .where(eq(eventExpenses.eventId, eventId));
-  const totalExpense = Number(expenseResult?.total ?? 0);
+  const baseExpense = Number(expenseResult?.total ?? 0);
+
+  const refundEnabled = event.status === 'cancelled' && (event.isPaid || event.isDonation);
+  let totalRefunded = 0;
+  let refundOutflow = 0;
+  let paidRefundCases = 0;
+
+  // Refund outflow applies only for cancelled paid events.
+  if (refundEnabled) {
+    const [refundResult] = await db
+      .select({
+        refundedAmount: sum(refundRequests.refundAmount),
+        paidCount: count(),
+      })
+      .from(refundRequests)
+      .where(
+        and(
+          eq(refundRequests.eventId, eventId),
+          or(eq(refundRequests.status, 'paid'), eq(refundRequests.status, 'confirmed')),
+        ),
+      );
+
+    totalRefunded = Number(refundResult?.refundedAmount ?? 0);
+    refundOutflow = totalRefunded;
+    paidRefundCases = refundResult?.paidCount ?? 0;
+  }
+
+  // Final expense includes regular event expenses + refund outflow
+  const totalExpense = baseExpense + refundOutflow;
 
   // Club subsidy = how much the club had to put in from its own budget
   const clubSubsidy = Math.max(0, totalExpense - totalRevenue);
@@ -1174,6 +1786,10 @@ export const getEventFinancials = async (eventId: number) => {
     estimatedBudget: event.estimatedBudget ?? 0,
     allocatedBudget: event.allocatedBudget ?? 0,
     totalRevenue,
+    baseExpense,
+    totalRefunded,
+    refundOutflow,
+    paidRefundCases,
     totalExpense,
     clubSubsidy,
     netAmount,
@@ -1192,6 +1808,7 @@ export const getEventFinancials = async (eventId: number) => {
 export const generateVoucher = async (eventId: number, userId: string) => {
   const [event] = await db.select().from(events).where(eq(events.id, eventId));
   if (!event) throw new HTTPException(404, { message: 'Event not found' });
+  await assertCommitteeOpen(event.committeeNumber);
 
   // Check if voucher already exists for this event
   const [existing] = await db
@@ -1323,6 +1940,7 @@ export const getEventVoucher = async (eventId: number) => {
 export const toggleFinancesLock = async (eventId: number, userId: string, lock: boolean) => {
   const [event] = await db.select().from(events).where(eq(events.id, eventId));
   if (!event) throw new HTTPException(404, { message: 'Event not found' });
+  await assertCommitteeOpen(event.committeeNumber);
 
   if (lock && event.financesLocked) {
     throw new HTTPException(400, { message: 'Finances are already locked' });

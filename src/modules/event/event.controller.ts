@@ -38,8 +38,13 @@ import {
   getEventVoucher,
   updateRegistrationResponses,
   toggleFinancesLock,
+  getFixPaymentDetails,
+  fixPayment,
+  getRegistrationStats,
+  autoUpdateEventStatuses,
 } from './event.service';
 import { uploadImageToCloudinary } from '../../utils/uploadImage';
+import { invalidate } from '../../utils/cache';
 
 export const create = async (c: Context) => {
   const contentType = c.req.header('content-type') ?? '';
@@ -56,11 +61,13 @@ export const create = async (c: Context) => {
       registrationDeadline: (formData.get('registrationDeadline') as string) || undefined,
       venue: (formData.get('venue') as string) || undefined,
       isPaid: formData.get('isPaid') === 'true',
+      isDonation: formData.get('isDonation') === 'true',
       fee: formData.get('fee') ? Number(formData.get('fee')) : 0,
       maxParticipants: formData.get('maxParticipants')
         ? Number(formData.get('maxParticipants'))
         : undefined,
       sslcommerzEnabled: formData.get('sslcommerzEnabled') === 'true',
+      isFeatured: formData.get('isFeatured') === 'true',
       estimatedBudget: formData.get('estimatedBudget')
         ? Number(formData.get('estimatedBudget'))
         : 0,
@@ -100,10 +107,14 @@ export const create = async (c: Context) => {
   }
 
   const event = await createEvent(data as any, c);
+  invalidate('events:');
   return c.json({ event }, 201);
 };
 
 export const list = async (c: Context) => {
+  // Auto-transition event statuses before listing
+  await autoUpdateEventStatuses();
+
   const committeeNumber = c.req.query('committee');
   const status = c.req.query('status');
   const gender = c.req.query('gender');
@@ -146,7 +157,11 @@ export const update = async (c: Context) => {
         }
         continue;
       }
-      if (key === 'isPaid' || key === 'sslcommerzEnabled') {
+      if (key === 'isPaid' || key === 'sslcommerzEnabled' || key === 'isDonation') {
+        data[key] = value === 'true';
+        continue;
+      }
+      if (key === 'isFeatured') {
         data[key] = value === 'true';
         continue;
       }
@@ -171,6 +186,7 @@ export const update = async (c: Context) => {
   }
 
   const event = await updateEvent(id, data);
+  invalidate('events:');
   return c.json({ event }, 200);
 };
 
@@ -178,6 +194,7 @@ export const remove = async (c: Context) => {
   const id = parseInt(c.req.param('id'));
   if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
   const result = await deleteEvent(id);
+  invalidate('events:');
   return c.json(result, 200);
 };
 
@@ -192,6 +209,7 @@ export const register = async (c: Context) => {
     body.paymentMethod,
     body.transactionId,
     body.customFieldResponses,
+    body.donationAmount ? Number(body.donationAmount) : undefined,
   );
   return c.json({ registration: reg }, 201);
 };
@@ -209,6 +227,11 @@ export const registrations = async (c: Context) => {
   if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
   const regs = await getEventRegistrations(id);
   return c.json({ registrations: regs }, 200);
+};
+
+export const registrationStatsController = async (c: Context) => {
+  const stats = await getRegistrationStats();
+  return c.json({ stats }, 200);
 };
 
 export const updateRegistrationResponsesController = async (c: Context) => {
@@ -236,9 +259,43 @@ export const submitPaymentController = async (c: Context) => {
 export const verifyPaymentController = async (c: Context) => {
   const id = parseInt(c.req.param('id'));
   if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
-  const { userId, verified } = await c.req.json();
+  const { userId, verified, rejectionReason, frontendBaseUrl, rejectionType, correctAmount } =
+    await c.req.json();
   if (!userId) return c.json({ message: 'userId is required' }, 400);
-  const result = await verifyPayment(id, userId.toUpperCase(), verified !== false);
+  const result = await verifyPayment(
+    id,
+    userId.toUpperCase(),
+    verified !== false,
+    rejectionReason,
+    frontendBaseUrl,
+    rejectionType,
+    correctAmount ? Number(correctAmount) : undefined,
+  );
+  return c.json({ registration: result }, 200);
+};
+
+export const getFixPaymentDetailsController = async (c: Context) => {
+  const id = parseInt(c.req.param('id'));
+  if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
+  const token = c.req.query('token');
+  if (!token) return c.json({ message: 'Token is required' }, 400);
+  const details = await getFixPaymentDetails(id, token);
+  return c.json(details, 200);
+};
+
+export const fixPaymentController = async (c: Context) => {
+  const id = parseInt(c.req.param('id'));
+  if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
+  const { token, paymentMethod, transactionId, donationAmount, mfsNumber } = await c.req.json();
+  if (!token) return c.json({ message: 'Token is required' }, 400);
+  const result = await fixPayment(
+    id,
+    token,
+    paymentMethod,
+    transactionId,
+    donationAmount ? Number(donationAmount) : undefined,
+    mfsNumber,
+  );
   return c.json({ registration: result }, 200);
 };
 
@@ -301,8 +358,8 @@ export const guestRegister = async (c: Context) => {
   if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
   const body = await c.req.json();
 
-  if (!body.studentId || !body.email || !body.name || !body.gender) {
-    return c.json({ message: 'studentId, email, name, and gender are required' }, 400);
+  if (!body.studentId || !body.email || !body.name || !body.gender || !body.password) {
+    return c.json({ message: 'studentId, email, name, gender, and password are required' }, 400);
   }
 
   const result = await guestRegisterForEvent(id, {
@@ -310,9 +367,11 @@ export const guestRegister = async (c: Context) => {
     email: body.email,
     name: body.name,
     gender: body.gender,
+    password: body.password,
     customFieldResponses: body.customFieldResponses,
     paymentMethod: body.paymentMethod,
     transactionId: body.transactionId,
+    donationAmount: body.donationAmount ? Number(body.donationAmount) : undefined,
   });
 
   return c.json(result, 201);

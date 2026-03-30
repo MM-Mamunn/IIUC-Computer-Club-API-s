@@ -3,28 +3,20 @@ import type { Context } from 'hono';
 import { db } from '../../config/db';
 import { committee, executives, users } from '../../db/schema';
 import { HTTPException } from 'hono/http-exception';
-import { and, eq, isNull, isNotNull, desc } from 'drizzle-orm';
-import { genderMatch } from '../global/global.service';
-// import { positions } from "./committee.controller";
+import { and, eq, isNull, isNotNull, desc, or } from 'drizzle-orm';
+import { cached, invalidate } from '../../utils/cache';
 
 export const addCommittee = async (
   number: string,
   start: string,
-  gender: string,
-  end: string | null, // accept null from controller
-  beginningBudget: number | null, // accept number | null
-  description: string | null, // accept string | null
-  c: Context,
+  session: string,
+  beginningBudget: number,
+  description: string | null,
+  userId: string,
 ) => {
-  if (!number || !start || !gender) {
+  if (!number || !start || !session) {
     throw new HTTPException(400, {
-      message: 'number, start and gender are required',
-    });
-  }
-  const user = c.get('user');
-  if ((await genderMatch(user.id, number)) === false) {
-    throw new HTTPException(403, {
-      message: 'You cannot create a committee for a different gender',
+      message: 'number, start, and session are required',
     });
   }
   if (isNaN(Date.parse(start))) {
@@ -32,81 +24,111 @@ export const addCommittee = async (
       message: 'Invalid start date format',
     });
   }
-
-  if (end && isNaN(Date.parse(end))) {
+  if (
+    typeof beginningBudget !== 'number' ||
+    !Number.isFinite(beginningBudget) ||
+    beginningBudget <= 0
+  ) {
     throw new HTTPException(400, {
-      message: 'Invalid end date format',
+      message: 'beginningBudget is required and must be a positive number',
     });
   }
 
-  if (end && new Date(end) < new Date(start)) {
-    throw new HTTPException(400, {
-      message: 'End date cannot be before start date',
-    });
-  }
+  const femaleNumber = `${number} Female`;
 
-  // validate beginningBudget if provided (must be finite number)
-  if (beginningBudget !== null && beginningBudget !== undefined) {
-    if (typeof beginningBudget !== 'number' || !Number.isFinite(beginningBudget)) {
-      throw new HTTPException(400, {
-        message: 'beginningBudget must be a valid number',
-      });
-    }
-  }
-
-  // Check if an active committee (end IS NULL) exists for same gender
-  const activeCommittee = await db
+  // Check if any active committee already exists for either gender
+  const activeCommittees = await db
     .select()
     .from(committee)
-    .where(and(eq(committee.gender, gender), isNull(committee.end)))
+    .where(
+      and(isNull(committee.end), or(eq(committee.gender, 'male'), eq(committee.gender, 'female'))),
+    )
     .limit(1);
 
-  if (activeCommittee.length > 0) {
+  if (activeCommittees.length > 0) {
     throw new HTTPException(409, {
-      message: `An active committee for gender '${gender}' already exists. You must close it first.`,
+      message: 'Active committees already exist. You must close them first.',
     });
   }
 
-  // Check by committee number existence
-  const existing = await db.select().from(committee).where(eq(committee.number, number)).limit(1);
+  // Check by committee number existence (both male and female)
+  const existing = await db
+    .select()
+    .from(committee)
+    .where(or(eq(committee.number, number), eq(committee.number, femaleNumber)))
+    .limit(1);
 
   if (existing.length > 0) {
     throw new HTTPException(409, {
-      message: `Committee ${number} already exists`,
+      message: `Committee ${existing[0].number} already exists`,
     });
   }
 
-  // Insert new committee
-  const [newCommittee] = await db
+  // Insert both committees
+  const [maleCommittee] = await db
     .insert(committee)
     .values({
       number,
       start,
-      gender,
-      end: end ?? null,
-      beginningBudget: beginningBudget ?? null,
+      session,
+      gender: 'male',
+      end: null,
+      beginningBudget,
       description: description ?? null,
     })
     .returning();
 
-  return newCommittee;
+  await db.insert(committee).values({
+    number: femaleNumber,
+    start,
+    session,
+    gender: 'female',
+    end: null,
+    beginningBudget: null,
+    description: description ?? null,
+  });
+
+  // Assign the creator as president of both committees
+  await db.insert(executives).values([
+    {
+      id: userId,
+      number: maleCommittee.number,
+      role: 'president',
+      position: 'president',
+      assignedBy: userId,
+    },
+    {
+      id: userId,
+      number: femaleNumber,
+      role: 'president',
+      position: 'president',
+      assignedBy: userId,
+    },
+  ]);
+
+  // Invalidate committee + dashboard caches
+  invalidate('committee:');
+  invalidate('dashboard:');
+  invalidate('president:');
+
+  return maleCommittee;
 };
 
-export const showActive = async () => {
-  const activeCommittees = await db
-    .select({
-      number: committee.number,
-      gender: committee.gender,
-      start: committee.start,
-      end: committee.end,
-      description: committee.description,
-      beginningBudget: committee.beginningBudget,
-    })
-    .from(committee)
-    .where(isNull(committee.end));
-
-  return activeCommittees;
-};
+export const showActive = () =>
+  cached('committee:active', 60_000, async () => {
+    return db
+      .select({
+        number: committee.number,
+        gender: committee.gender,
+        start: committee.start,
+        session: committee.session,
+        end: committee.end,
+        description: committee.description,
+        beginningBudget: committee.beginningBudget,
+      })
+      .from(committee)
+      .where(isNull(committee.end));
+  });
 
 export const showPositions = async (number: string, c: Context) => {
   const poss = await db
@@ -116,22 +138,22 @@ export const showPositions = async (number: string, c: Context) => {
   return poss;
 };
 
-// ─── Show All Committees ───
-export const showAllCommittees = async () => {
-  const all = await db
-    .select({
-      number: committee.number,
-      gender: committee.gender,
-      start: committee.start,
-      end: committee.end,
-      description: committee.description,
-      beginningBudget: committee.beginningBudget,
-    })
-    .from(committee)
-    .orderBy(desc(committee.start));
-
-  return all;
-};
+// ─── Show All Committees (cached 60s) ───
+export const showAllCommittees = () =>
+  cached('committee:all', 60_000, async () => {
+    return db
+      .select({
+        number: committee.number,
+        gender: committee.gender,
+        start: committee.start,
+        session: committee.session,
+        end: committee.end,
+        description: committee.description,
+        beginningBudget: committee.beginningBudget,
+      })
+      .from(committee)
+      .orderBy(desc(committee.start));
+  });
 
 // ─── Close Committee ───
 export const closeCommittee = async (number: string, endDate: string) => {
@@ -149,16 +171,33 @@ export const closeCommittee = async (number: string, endDate: string) => {
     throw new HTTPException(400, { message: 'Valid end date is required' });
   }
 
+  // Close this committee
   const [updated] = await db
     .update(committee)
     .set({ end: endDate })
     .where(eq(committee.number, number))
     .returning();
 
+  // Also close the sibling committee (male ↔ female)
+  const siblingNumber =
+    existing.gender === 'male' ? `${number}F` : number.endsWith('F') ? number.slice(0, -1) : null;
+
+  if (siblingNumber) {
+    const [sibling] = await db.select().from(committee).where(eq(committee.number, siblingNumber));
+    if (sibling && !sibling.end) {
+      await db.update(committee).set({ end: endDate }).where(eq(committee.number, siblingNumber));
+    }
+  }
+
+  // Invalidate committee + dashboard caches
+  invalidate('committee:');
+  invalidate('dashboard:');
+  invalidate('president:');
+
   return updated;
 };
 
-// ─── Show Committee Members ───
+// ─── Show Committee Members (cached 60s) ───
 export const showMembers = async (number: string) => {
   const [com] = await db.select().from(committee).where(eq(committee.number, number));
 
@@ -166,19 +205,19 @@ export const showMembers = async (number: string) => {
     throw new HTTPException(404, { message: 'Committee not found' });
   }
 
-  const members = await db
-    .select({
-      id: executives.id,
-      name: users.name,
-      email: users.email,
-      gender: users.gender,
-      profileImage: users.profileImage,
-      role: executives.role,
-      position: executives.position,
-    })
-    .from(executives)
-    .innerJoin(users, eq(executives.id, users.id))
-    .where(eq(executives.number, number));
-
-  return members;
+  return cached(`committee:members:${number}`, 60_000, async () => {
+    return db
+      .select({
+        id: executives.id,
+        name: users.name,
+        email: users.email,
+        gender: users.gender,
+        profileImage: users.profileImage,
+        role: executives.role,
+        position: executives.position,
+      })
+      .from(executives)
+      .innerJoin(users, eq(executives.id, users.id))
+      .where(eq(executives.number, number));
+  });
 };

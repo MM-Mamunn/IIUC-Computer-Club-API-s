@@ -8,6 +8,7 @@ import {
   doublePrecision,
   integer,
   boolean,
+  serial,
 } from 'drizzle-orm/pg-core';
 
 /* =========================
@@ -35,6 +36,8 @@ export const committee = pgTable('committee', {
   gender: varchar('gender', { length: 20 }).notNull().default('male'),
 
   start: date('start').notNull(),
+
+  session: varchar('session', { length: 100 }).notNull(),
 
   end: date('end'),
 
@@ -101,3 +104,14 @@ export const executives = pgTable(
     pk: primaryKey({ columns: [table.id, table.number] }),
   }),
 );
+
+/* =========================
+   NEWSLETTER SUBSCRIPTIONS
+========================= */
+export const newsletterSubscriptions = pgTable('newsletter_subscriptions', {
+  id: serial('id').primaryKey(),
+  email: varchar('email', { length: 255 }).notNull().unique(),
+  isActive: boolean('is_active').notNull().default(true),
+  source: varchar('source', { length: 50 }).notNull().default('landing-footer'),
+  subscribedAt: timestamp('subscribed_at', { withTimezone: true }).notNull().defaultNow(),
+});

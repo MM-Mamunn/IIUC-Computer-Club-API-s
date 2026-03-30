@@ -7,6 +7,8 @@ import {
   updateUserController,
   changePass,
   refresh,
+  forgotPass,
+  resetPass,
 } from './auth.controller';
 import { authMiddleware } from '../../middlewares/auth.middleware';
 
@@ -15,6 +17,8 @@ const router = new Hono();
 
 router.post('/register', register);
 router.post('/login', login);
+router.post('/forgot-password', forgotPass);
+router.post('/reset-password', resetPass);
 router.post('/uploadimg', authMiddleware, uploadImage);
 router.get('/me', authMiddleware, me);
 

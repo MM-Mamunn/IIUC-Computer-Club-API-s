@@ -12,23 +12,22 @@ import {
 type CommitteeBody = {
   number: string;
   start: string;
-  end?: string | null;
-  gender: string;
-  beginningBudget?: number | null;
+  session: string;
+  beginningBudget: number;
   description?: string | null;
 };
 
 export const newCommittee = async (c: Context) => {
   const body = (await c.req.json()) as CommitteeBody;
+  const user = c.get('user');
 
   const committee = await addCommittee(
     body.number,
     body.start,
-    body.gender,
-    body.end ?? null,
-    body.beginningBudget ?? null,
+    body.session,
+    body.beginningBudget,
     body.description ?? null,
-    c,
+    user.id
   );
 
   return c.json({ committee }, 201);

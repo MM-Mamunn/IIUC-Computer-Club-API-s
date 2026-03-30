@@ -6,7 +6,10 @@ import authorizationRoutes from './modules/authorization/authorization.routes';
 import userRoutes from './modules/user/user.routes';
 import committeeRoutes from './modules/committee/committee.routes';
 import eventRoutes from './modules/event/event.routes';
+import refundRoutes from './modules/refund/refund.routes';
+import newsletterRoutes from './modules/newsletter/newsletter.routes';
 import general from './modules/general/general.routes';
+import { invalidate } from './utils/cache';
 
 const app = new Hono();
 
@@ -46,6 +49,31 @@ app.get('/api', (c) => {
 });
 
 /**
+ * Cache-busting middleware:
+ * After any successful POST/PUT/PATCH/DELETE, invalidate related caches.
+ * Must be registered BEFORE routes so middleware wraps them.
+ */
+app.use('/api/events/*', async (c, next) => {
+  await next();
+  const method = c.req.method;
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) && c.res.status < 400) {
+    invalidate('events:');
+    invalidate('dashboard:');
+    invalidate('president:');
+  }
+});
+
+app.use('/api/authorization/*', async (c, next) => {
+  await next();
+  const method = c.req.method;
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) && c.res.status < 400) {
+    invalidate('committee:members:');
+    invalidate('dashboard:');
+    invalidate('president:');
+  }
+});
+
+/**
  * API Routes
  */
 app.route('/api', general);
@@ -54,6 +82,8 @@ app.route('/api/users', userRoutes);
 app.route('/api/authorization', authorizationRoutes);
 app.route('/api/committee', committeeRoutes);
 app.route('/api/events', eventRoutes);
+app.route('/api/refunds', refundRoutes);
+app.route('/api/newsletter', newsletterRoutes);
 
 /**
  * Global error handler — returns clean, user-friendly messages.
