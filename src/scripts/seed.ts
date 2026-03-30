@@ -375,7 +375,7 @@ const CURRENT_MALE_COMMITTEE_2026 = [
 ] as const;
 
 function emailFromId(id: string) {
-  return `${id.toLowerCase()}@iiuc.ac.bd`;
+  return `${id.toLowerCase()}@ugrad.iiuc.ac.bd`;
 }
 
 async function seed() {
