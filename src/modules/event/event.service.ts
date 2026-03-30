@@ -10,7 +10,7 @@ import {
   refundRequests,
 } from '../../db/event.schema';
 import { createRefundCasesForEvent } from '../refund/refund.service';
-import { users, committee } from '../../db/schema';
+import { users, committee, executives } from '../../db/schema';
 import { eq, ne, desc, and, or, count, sum, sql, lte } from 'drizzle-orm';
 import { HTTPException } from 'hono/http-exception';
 import type { Context } from 'hono';
@@ -1157,6 +1157,22 @@ export const assignDuty = async (
   const [userExists] = await db.select().from(users).where(eq(users.id, userId));
   if (!userExists) throw new HTTPException(404, { message: 'User not found' });
 
+  // Guard: target user must be an executive in an active committee
+  const activeComms = await db
+    .select({ number: committee.number })
+    .from(committee)
+    .where(and(eq(committee.number, event.committeeNumber), sql`${committee.end} IS NULL`));
+  if (activeComms.length === 0) throw new HTTPException(400, { message: 'Committee is not active' });
+  const [isExec] = await db
+    .select()
+    .from(executives)
+    .where(and(eq(executives.id, userId), eq(executives.number, event.committeeNumber)));
+  if (!isExec) {
+    throw new HTTPException(403, {
+      message: 'Only executive members of this committee can be assigned duties',
+    });
+  }
+
   const [existing] = await db
     .select()
     .from(eventDuties)
@@ -1292,6 +1308,22 @@ export const addEventManager = async (eventId: number, userId: string, assignedB
 
   const [userExists] = await db.select().from(users).where(eq(users.id, userId));
   if (!userExists) throw new HTTPException(404, { message: 'User not found' });
+
+  // Guard: target user must be an executive in an active committee
+  const activeCommsForMgr = await db
+    .select({ number: committee.number })
+    .from(committee)
+    .where(and(eq(committee.number, event.committeeNumber), sql`${committee.end} IS NULL`));
+  if (activeCommsForMgr.length === 0) throw new HTTPException(400, { message: 'Committee is not active' });
+  const [isExecForMgr] = await db
+    .select()
+    .from(executives)
+    .where(and(eq(executives.id, userId), eq(executives.number, event.committeeNumber)));
+  if (!isExecForMgr) {
+    throw new HTTPException(403, {
+      message: 'Only executive members of this committee can be assigned as event managers',
+    });
+  }
 
   const [existing] = await db
     .select()
