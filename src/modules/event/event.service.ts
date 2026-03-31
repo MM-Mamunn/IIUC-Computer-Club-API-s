@@ -67,6 +67,12 @@ export const createEvent = async (
     throw new HTTPException(400, { message: 'Gender restriction must be male, female, or both' });
   }
 
+  if (data.maxParticipants !== undefined && data.maxParticipants !== null) {
+    if (!Number.isInteger(data.maxParticipants) || data.maxParticipants <= 0) {
+      throw new HTTPException(400, { message: 'Max participants must be a positive integer' });
+    }
+  }
+
   const [event] = await db.transaction(async (tx) => {
     if (data.isFeatured) {
       await tx.update(events).set({ isFeatured: false }).where(eq(events.isFeatured, true));
@@ -282,6 +288,18 @@ export const updateEvent = async (id: number, data: Record<string, unknown>) => 
       } else {
         updateData[k] = v;
       }
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(updateData, 'maxParticipants')) {
+    const rawMaxParticipants = updateData.maxParticipants;
+    if (
+      rawMaxParticipants !== null &&
+      (typeof rawMaxParticipants !== 'number' ||
+        !Number.isInteger(rawMaxParticipants) ||
+        rawMaxParticipants <= 0)
+    ) {
+      throw new HTTPException(400, { message: 'Max participants must be a positive integer' });
     }
   }
 
