@@ -53,6 +53,12 @@ export const create = async (c: Context) => {
 
   if (contentType.includes('multipart/form-data')) {
     const formData = await c.req.formData();
+    const rawMaxParticipants = formData.get('maxParticipants');
+    const parsedMaxParticipants =
+      typeof rawMaxParticipants === 'string' && rawMaxParticipants.trim()
+        ? Number(rawMaxParticipants.trim())
+        : undefined;
+
     data = {
       title: formData.get('title') as string,
       description: (formData.get('description') as string) || undefined,
@@ -63,9 +69,7 @@ export const create = async (c: Context) => {
       isPaid: formData.get('isPaid') === 'true',
       isDonation: formData.get('isDonation') === 'true',
       fee: formData.get('fee') ? Number(formData.get('fee')) : 0,
-      maxParticipants: formData.get('maxParticipants')
-        ? Number(formData.get('maxParticipants'))
-        : undefined,
+      maxParticipants: parsedMaxParticipants,
       sslcommerzEnabled: formData.get('sslcommerzEnabled') === 'true',
       isFeatured: formData.get('isFeatured') === 'true',
       estimatedBudget: formData.get('estimatedBudget')
@@ -167,11 +171,16 @@ export const update = async (c: Context) => {
       }
       if (
         key === 'fee' ||
-        key === 'maxParticipants' ||
         key === 'estimatedBudget' ||
         key === 'allocatedBudget'
       ) {
-        data[key] = value ? Number(value) : undefined;
+        const trimmed = String(value).trim();
+        data[key] = trimmed ? Number(trimmed) : undefined;
+        continue;
+      }
+      if (key === 'maxParticipants') {
+        const trimmed = String(value).trim();
+        data[key] = trimmed ? Number(trimmed) : null;
         continue;
       }
       data[key] = value || undefined;
