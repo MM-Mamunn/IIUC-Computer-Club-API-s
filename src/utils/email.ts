@@ -5,13 +5,53 @@ const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || 'smtp.gmail.com',
   port: Number(process.env.SMTP_PORT) || 587,
   secure: false,
+  pool: true,
+  maxConnections: 1,
+  maxMessages: 50,
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
 });
 
-const FROM = process.env.SMTP_FROM || '"IIUC Computer Club" <noreply@iiuccc.com>';
+const FALLBACK_FROM = process.env.SMTP_USER
+  ? `"IIUC Computer Club" <${process.env.SMTP_USER}>`
+  : '"IIUC Computer Club" <noreply@iiuccc.com>';
+const FROM = process.env.SMTP_FROM || FALLBACK_FROM;
+
+type MailOptions = Parameters<typeof transporter.sendMail>[0];
+
+let mailQueue: Promise<void> = Promise.resolve();
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function sendMailWithRetry(message: MailOptions, attempts = 3) {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await transporter.sendMail(message);
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts) {
+        await sleep(250 * attempt);
+      }
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error('Failed to send email');
+}
+
+async function enqueueMail(message: MailOptions) {
+  const run = mailQueue.catch(() => undefined).then(() => sendMailWithRetry(message));
+  mailQueue = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
 
 /** Generate a random 8-character temporary password */
 export function generateTempPassword(): string {
@@ -56,7 +96,7 @@ export async function sendWelcomeEmail(
   `;
 
   try {
-    await transporter.sendMail({
+    await enqueueMail({
       from: FROM,
       to,
       subject: 'Welcome to IIUC Computer Club — Your Account Credentials',
@@ -117,7 +157,7 @@ export async function sendEventRegistrationEmail(
   `;
 
   try {
-    await transporter.sendMail({
+    await enqueueMail({
       from: FROM,
       to,
       subject: `Registration Confirmed — ${eventTitle}`,
@@ -169,7 +209,7 @@ export async function sendPaymentConfirmedEmail(
   `;
 
   try {
-    await transporter.sendMail({
+    await enqueueMail({
       from: FROM,
       to,
       subject: `Payment Confirmed — ${eventTitle}`,
@@ -215,7 +255,7 @@ export async function sendPasswordResetEmail(to: string, name: string, resetLink
   `;
 
   try {
-    await transporter.sendMail({
+    await enqueueMail({
       from: FROM,
       to,
       subject: 'Password Reset — IIUC Computer Club',
@@ -328,7 +368,7 @@ export async function sendPaymentRejectionEmail(
         : 'Payment Rejected';
 
   try {
-    await transporter.sendMail({
+    await enqueueMail({
       from: FROM,
       to,
       subject: `${subjectSuffix} — ${eventTitle}`,
@@ -371,7 +411,7 @@ export async function sendRefundOpenedEmail(
   `;
 
   try {
-    await transporter.sendMail({
+    await enqueueMail({
       from: FROM,
       to,
       subject: `Refund Initiated — ${eventTitle}`,
@@ -429,7 +469,7 @@ export async function sendRefundStatusEmail(
   `;
 
   try {
-    await transporter.sendMail({
+    await enqueueMail({
       from: FROM,
       to,
       subject: `Refund Update — ${eventTitle}`,

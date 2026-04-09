@@ -57,14 +57,14 @@ export const createRefundCasesForEvent = async (eventId: number) => {
     )
     .onConflictDoNothing();
 
-  // Notify students (fire-and-forget)
+  // Notify students sequentially so the serverless invocation stays alive until delivery.
   const studentRows = await db
     .select({ email: users.email, name: users.name })
     .from(users)
     .where(or(...regs.map((r) => eq(users.id, r.userId))));
 
   for (const s of studentRows) {
-    sendRefundOpenedEmail(s.email, s.name, event.title, event.fee ?? 0).catch(() => {});
+    await sendRefundOpenedEmail(s.email, s.name, event.title, event.fee ?? 0);
   }
 };
 
@@ -328,7 +328,7 @@ export const processRefund = async (
     .where(eq(events.id, req.eventId));
 
   if (student && event) {
-    sendRefundStatusEmail(student.email, student.name, event.title, 'confirmed').catch(() => {});
+    await sendRefundStatusEmail(student.email, student.name, event.title, 'confirmed');
   }
 
   return updated;

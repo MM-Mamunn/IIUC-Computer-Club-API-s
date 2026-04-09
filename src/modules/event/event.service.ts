@@ -438,7 +438,7 @@ export const registerForEvent = async (
     .from(users)
     .where(eq(users.id, userId));
   if (regUser) {
-    sendEventRegistrationEmail(
+    await sendEventRegistrationEmail(
       regUser.email,
       regUser.name,
       event.title,
@@ -607,7 +607,7 @@ export const guestRegisterForEvent = async (
   });
 
   // Send event registration confirmation email (async, don't block response)
-  sendEventRegistrationEmail(
+  await sendEventRegistrationEmail(
     email,
     data.name.trim(),
     event.title,
@@ -857,7 +857,7 @@ export const verifyPayment = async (
     const [user] = await db.select().from(users).where(eq(users.id, userId));
     const [event] = await db.select().from(events).where(eq(events.id, eventId));
     if (user?.email && event) {
-      sendPaymentConfirmedEmail(
+      await sendPaymentConfirmedEmail(
         user.email,
         user.name,
         event.title,
@@ -936,7 +936,7 @@ export const verifyPayment = async (
       const baseUrl = frontendBaseUrl || process.env.FRONTEND_URL || 'http://localhost:3000';
       const fixPaymentLink = `${baseUrl}/events/${eventId}/fix-payment?token=${fixToken}`;
 
-      sendPaymentRejectionEmail(
+      await sendPaymentRejectionEmail(
         user.email,
         user.name,
         event.title,
@@ -982,7 +982,7 @@ export const verifySslcommerzPayment = async (tranId: string, valId: string) => 
   const [user] = await db.select().from(users).where(eq(users.id, reg.userId));
   const [event] = await db.select().from(events).where(eq(events.id, reg.eventId));
   if (user?.email && event) {
-    sendPaymentConfirmedEmail(
+    await sendPaymentConfirmedEmail(
       user.email,
       user.name,
       event.title,
