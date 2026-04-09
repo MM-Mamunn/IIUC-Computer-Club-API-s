@@ -1,10 +1,12 @@
-import nodemailer from 'nodemailer';
-import { formatBangladeshDateTime } from './datetime';
+import nodemailer from "nodemailer";
+import { formatBangladeshDateTime } from "./datetime";
 
 const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.gmail.com',
+  host: process.env.SMTP_HOST || "smtp.gmail.com",
   port: Number(process.env.SMTP_PORT) || 587,
   secure: false,
+  // Explicitly require STARTTLS on port 587 — prevents silent plaintext fallback
+  requireTLS: true,
   pool: true,
   maxConnections: 1,
   maxMessages: 50,
@@ -14,10 +16,14 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-const FALLBACK_FROM = process.env.SMTP_USER
+// Gmail SMTP strictly requires the From address to exactly match the authenticated
+// SMTP_USER account. Using any other address (e.g. a custom SMTP_FROM like
+// noreply@iiuccc.com) causes Gmail — and recipient Google Workspace servers such as
+// @ugrad.iiuc.ac.bd — to reject the message with "Message rejected / blocked".
+// Therefore we always derive FROM from SMTP_USER and ignore any SMTP_FROM override.
+const FROM = process.env.SMTP_USER
   ? `"IIUC Computer Club" <${process.env.SMTP_USER}>`
   : '"IIUC Computer Club" <noreply@iiuccc.com>';
-const FROM = process.env.SMTP_FROM || FALLBACK_FROM;
 
 type MailOptions = Parameters<typeof transporter.sendMail>[0];
 
@@ -41,11 +47,15 @@ async function sendMailWithRetry(message: MailOptions, attempts = 3) {
     }
   }
 
-  throw lastError instanceof Error ? lastError : new Error('Failed to send email');
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("Failed to send email");
 }
 
 async function enqueueMail(message: MailOptions) {
-  const run = mailQueue.catch(() => undefined).then(() => sendMailWithRetry(message));
+  const run = mailQueue
+    .catch(() => undefined)
+    .then(() => sendMailWithRetry(message));
   mailQueue = run.then(
     () => undefined,
     () => undefined,
@@ -55,8 +65,8 @@ async function enqueueMail(message: MailOptions) {
 
 /** Generate a random 8-character temporary password */
 export function generateTempPassword(): string {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
-  let pw = '';
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
+  let pw = "";
   for (let i = 0; i < 8; i++) {
     pw += chars.charAt(Math.floor(Math.random() * chars.length));
   }
@@ -99,11 +109,11 @@ export async function sendWelcomeEmail(
     await enqueueMail({
       from: FROM,
       to,
-      subject: 'Welcome to IIUC Computer Club — Your Account Credentials',
+      subject: "Welcome to IIUC Computer Club — Your Account Credentials",
       html,
     });
   } catch (err) {
-    console.error('Failed to send welcome email:', err);
+    console.error("Failed to send welcome email:", err);
   }
 }
 
@@ -129,7 +139,7 @@ export async function sendEventRegistrationEmail(
   const pendingNote =
     isPaid || isDonation
       ? '<p style="color: #f57c00;">Your payment is pending verification. You will be notified once it is confirmed.</p>'
-      : '';
+      : "";
 
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
@@ -144,7 +154,7 @@ export async function sendEventRegistrationEmail(
         <div style="background: #fff; border: 1px solid #c8e6c9; border-radius: 6px; padding: 16px; margin: 16px 0;">
           <h3 style="margin-top: 0; color: #1a1a1a;">${eventTitle}</h3>
           <p style="margin: 4px 0; color: #555;">📅 <strong>Date:</strong> ${dateStr}</p>
-          ${venue ? `<p style="margin: 4px 0; color: #555;">📍 <strong>Venue:</strong> ${venue}</p>` : ''}
+          ${venue ? `<p style="margin: 4px 0; color: #555;">📍 <strong>Venue:</strong> ${venue}</p>` : ""}
           ${paymentLine}
         </div>
         ${pendingNote}
@@ -164,7 +174,7 @@ export async function sendEventRegistrationEmail(
       html,
     });
   } catch (err) {
-    console.error('Failed to send event registration email:', err);
+    console.error("Failed to send event registration email:", err);
   }
 }
 
@@ -197,7 +207,7 @@ export async function sendPaymentConfirmedEmail(
         <div style="background: #fff; border: 1px solid #c8e6c9; border-radius: 6px; padding: 16px; margin: 16px 0;">
           <h3 style="margin-top: 0; color: #1a1a1a;">${eventTitle}</h3>
           <p style="margin: 4px 0; color: #555;">📅 <strong>Date:</strong> ${dateStr}</p>
-          ${venue ? `<p style="margin: 4px 0; color: #555;">📍 <strong>Venue:</strong> ${venue}</p>` : ''}
+          ${venue ? `<p style="margin: 4px 0; color: #555;">📍 <strong>Venue:</strong> ${venue}</p>` : ""}
           ${amountLine}
         </div>
         <p style="color: #2e7d32; font-weight: bold;">Your registration is now fully confirmed. See you at the event!</p>
@@ -216,12 +226,16 @@ export async function sendPaymentConfirmedEmail(
       html,
     });
   } catch (err) {
-    console.error('Failed to send payment confirmed email:', err);
+    console.error("Failed to send payment confirmed email:", err);
   }
 }
 
 /** Send password reset email with a reset link */
-export async function sendPasswordResetEmail(to: string, name: string, resetLink: string) {
+export async function sendPasswordResetEmail(
+  to: string,
+  name: string,
+  resetLink: string,
+) {
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
       <div style="text-align: center; margin-bottom: 24px;">
@@ -258,11 +272,11 @@ export async function sendPasswordResetEmail(to: string, name: string, resetLink
     await enqueueMail({
       from: FROM,
       to,
-      subject: 'Password Reset — IIUC Computer Club',
+      subject: "Password Reset — IIUC Computer Club",
       html,
     });
   } catch (err) {
-    console.error('Failed to send password reset email:', err);
+    console.error("Failed to send password reset email:", err);
   }
 }
 
@@ -277,7 +291,7 @@ export async function sendPaymentRejectionEmail(
   fixPaymentLink: string,
   fee: number,
   isDonation: boolean,
-  rejectionType: string = 'other',
+  rejectionType: string = "other",
   amountDeficit?: number,
 ) {
   const dateStr = formatBangladeshDateTime(eventDate);
@@ -287,22 +301,22 @@ export async function sendPaymentRejectionEmail(
     : `<p style="margin: 4px 0; color: #555;">💰 <strong>Amount Required:</strong> ৳${fee}</p>`;
 
   // Type-specific content
-  let reasonTitle = 'Reason for Rejection:';
+  let reasonTitle = "Reason for Rejection:";
   let reasonMessage = rejectionReason;
   let instructionText =
-    'Please submit a new payment using the button below. Make sure to use the correct amount and payment method.';
-  let buttonLabel = 'Fix Payment';
-  let extraInfo = '';
+    "Please submit a new payment using the button below. Make sure to use the correct amount and payment method.";
+  let buttonLabel = "Fix Payment";
+  let extraInfo = "";
 
-  if (rejectionType === 'incorrect_trxid') {
-    reasonTitle = 'Issue: Incorrect Transaction ID';
+  if (rejectionType === "incorrect_trxid") {
+    reasonTitle = "Issue: Incorrect Transaction ID";
     reasonMessage =
-      'Your transaction ID could not be verified or was entered incorrectly. Please submit the correct transaction ID.';
+      "Your transaction ID could not be verified or was entered incorrectly. Please submit the correct transaction ID.";
     instructionText =
-      'Click the button below to submit your correct Transaction ID. You do not need to make a new payment.';
-    buttonLabel = 'Update Transaction ID';
-  } else if (rejectionType === 'incorrect_amount') {
-    reasonTitle = 'Issue: Incorrect Payment Amount';
+      "Click the button below to submit your correct Transaction ID. You do not need to make a new payment.";
+    buttonLabel = "Update Transaction ID";
+  } else if (rejectionType === "incorrect_amount") {
+    reasonTitle = "Issue: Incorrect Payment Amount";
     if (amountDeficit && amountDeficit > 0) {
       reasonMessage = `The payment amount you submitted does not match the required amount. You need to pay <strong>৳${amountDeficit}</strong> more to complete your registration.`;
       extraInfo = `
@@ -312,10 +326,10 @@ export async function sendPaymentRejectionEmail(
         </div>`;
     } else {
       reasonMessage =
-        'The payment amount you submitted does not match the required amount. Please make a new payment with the correct amount.';
+        "The payment amount you submitted does not match the required amount. Please make a new payment with the correct amount.";
     }
-    instructionText = 'Click the button below to submit the remaining payment.';
-    buttonLabel = 'Pay Remaining Amount';
+    instructionText = "Click the button below to submit the remaining payment.";
+    buttonLabel = "Pay Remaining Amount";
   }
 
   const html = `
@@ -331,7 +345,7 @@ export async function sendPaymentRejectionEmail(
         <div style="background: #fff; border: 1px solid #fecaca; border-radius: 6px; padding: 16px; margin: 16px 0;">
           <h3 style="margin-top: 0; color: #1a1a1a;">${eventTitle}</h3>
           <p style="margin: 4px 0; color: #555;">📅 <strong>Date:</strong> ${dateStr}</p>
-          ${venue ? `<p style="margin: 4px 0; color: #555;">📍 <strong>Venue:</strong> ${venue}</p>` : ''}
+          ${venue ? `<p style="margin: 4px 0; color: #555;">📍 <strong>Venue:</strong> ${venue}</p>` : ""}
           ${amountLine}
         </div>
         <div style="background: #fff; border: 1px solid #fecaca; border-radius: 6px; padding: 16px; margin: 16px 0;">
@@ -361,11 +375,11 @@ export async function sendPaymentRejectionEmail(
   `;
 
   const subjectSuffix =
-    rejectionType === 'incorrect_trxid'
-      ? 'Incorrect Transaction ID'
-      : rejectionType === 'incorrect_amount'
-        ? 'Incorrect Payment Amount'
-        : 'Payment Rejected';
+    rejectionType === "incorrect_trxid"
+      ? "Incorrect Transaction ID"
+      : rejectionType === "incorrect_amount"
+        ? "Incorrect Payment Amount"
+        : "Payment Rejected";
 
   try {
     await enqueueMail({
@@ -375,7 +389,7 @@ export async function sendPaymentRejectionEmail(
       html,
     });
   } catch (err) {
-    console.error('Failed to send payment rejection email:', err);
+    console.error("Failed to send payment rejection email:", err);
   }
 }
 
@@ -418,7 +432,7 @@ export async function sendRefundOpenedEmail(
       html,
     });
   } catch (err) {
-    console.error('Failed to send refund opened email:', err);
+    console.error("Failed to send refund opened email:", err);
   }
 }
 
@@ -430,21 +444,24 @@ export async function sendRefundStatusEmail(
   status: string,
   rejectionReason?: string,
 ) {
-  const statusMessages: Record<string, { headline: string; body: string; color: string }> = {
+  const statusMessages: Record<
+    string,
+    { headline: string; body: string; color: string }
+  > = {
     approved: {
-      headline: 'Refund Approved ✅',
-      body: 'Your refund destination has been reviewed and approved. The organizer will process your refund shortly.',
-      color: '#2e7d32',
+      headline: "Refund Approved ✅",
+      body: "Your refund destination has been reviewed and approved. The organizer will process your refund shortly.",
+      color: "#2e7d32",
     },
     rejected: {
-      headline: 'Refund Destination Rejected ❌',
-      body: `Your refund destination was rejected${rejectionReason ? `: <em>${rejectionReason}</em>` : ''}. Please log in and resubmit with correct information.`,
-      color: '#c62828',
+      headline: "Refund Destination Rejected ❌",
+      body: `Your refund destination was rejected${rejectionReason ? `: <em>${rejectionReason}</em>` : ""}. Please log in and resubmit with correct information.`,
+      color: "#c62828",
     },
     paid: {
-      headline: 'Refund Sent 💸',
-      body: 'Your refund has been processed and sent. Please log in to confirm receipt and view the proof of payment.',
-      color: '#1565c0',
+      headline: "Refund Sent 💸",
+      body: "Your refund has been processed and sent. Please log in to confirm receipt and view the proof of payment.",
+      color: "#1565c0",
     },
   };
 
@@ -476,6 +493,6 @@ export async function sendRefundStatusEmail(
       html,
     });
   } catch (err) {
-    console.error('Failed to send refund status email:', err);
+    console.error("Failed to send refund status email:", err);
   }
 }
