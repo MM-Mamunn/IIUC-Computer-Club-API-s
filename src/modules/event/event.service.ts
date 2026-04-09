@@ -22,6 +22,7 @@ import {
   sendPaymentConfirmedEmail,
   sendPaymentRejectionEmail,
 } from '../../utils/email';
+import { getBangladeshDayKey, getBangladeshYear } from '../../utils/datetime';
 import { generateToken, verifyToken } from '../../utils/jwt';
 
 function invalidateEventCaches() {
@@ -1056,12 +1057,10 @@ export const unregisterFromEvent = async (eventId: number, userId: string) => {
       });
     }
   } else {
-    // No deadline set — block on the event day
-    const eventDay = new Date(event.eventDate);
-    eventDay.setHours(0, 0, 0, 0);
-    const today = new Date(now);
-    today.setHours(0, 0, 0, 0);
-    if (today >= eventDay) {
+    // No deadline set — block on the event day in Bangladesh time.
+    const todayKey = getBangladeshDayKey(now);
+    const eventDayKey = getBangladeshDayKey(event.eventDate);
+    if (todayKey && eventDayKey && todayKey >= eventDayKey) {
       throw new HTTPException(400, {
         message: 'Cannot unregister on or after the event day.',
       });
@@ -1180,7 +1179,8 @@ export const assignDuty = async (
     .select({ number: committee.number })
     .from(committee)
     .where(and(eq(committee.number, event.committeeNumber), sql`${committee.end} IS NULL`));
-  if (activeComms.length === 0) throw new HTTPException(400, { message: 'Committee is not active' });
+  if (activeComms.length === 0)
+    throw new HTTPException(400, { message: 'Committee is not active' });
   const [isExec] = await db
     .select()
     .from(executives)
@@ -1332,7 +1332,8 @@ export const addEventManager = async (eventId: number, userId: string, assignedB
     .select({ number: committee.number })
     .from(committee)
     .where(and(eq(committee.number, event.committeeNumber), sql`${committee.end} IS NULL`));
-  if (activeCommsForMgr.length === 0) throw new HTTPException(400, { message: 'Committee is not active' });
+  if (activeCommsForMgr.length === 0)
+    throw new HTTPException(400, { message: 'Committee is not active' });
   const [isExecForMgr] = await db
     .select()
     .from(executives)
@@ -1849,7 +1850,7 @@ export const generateVoucher = async (eventId: number, userId: string) => {
   const claimList = await getEventClaims(eventId);
 
   // Generate voucher number: IIUC-CC-{YEAR}-{sequential}
-  const year = new Date().getFullYear();
+  const year = getBangladeshYear();
   const [countResult] = await db.select({ count: count() }).from(vouchers);
   const seq = (countResult?.count ?? 0) + 1;
   const voucherNumber = `IIUC-CC-${year}-${String(seq).padStart(4, '0')}`;

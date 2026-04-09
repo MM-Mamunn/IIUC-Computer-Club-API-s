@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import { formatBangladeshDateTime } from './datetime';
 
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || 'smtp.gmail.com',
@@ -77,10 +78,7 @@ export async function sendEventRegistrationEmail(
   fee: number,
   isDonation?: boolean,
 ) {
-  const dateStr = new Date(eventDate).toLocaleString('en-US', {
-    dateStyle: 'full',
-    timeStyle: 'short',
-  });
+  const dateStr = formatBangladeshDateTime(eventDate);
 
   const paymentLine = isDonation
     ? '<p style="margin: 4px 0; color: #555;">🤝 <strong>Donation Event</strong></p>'
@@ -140,10 +138,7 @@ export async function sendPaymentConfirmedEmail(
   fee: number,
   isDonation?: boolean,
 ) {
-  const dateStr = new Date(eventDate).toLocaleString('en-US', {
-    dateStyle: 'full',
-    timeStyle: 'short',
-  });
+  const dateStr = formatBangladeshDateTime(eventDate);
 
   const amountLine = isDonation
     ? '<p style="margin: 4px 0; color: #555;">🤝 <strong>Donation Received</strong> — Thank you for your generosity!</p>'
@@ -245,10 +240,7 @@ export async function sendPaymentRejectionEmail(
   rejectionType: string = 'other',
   amountDeficit?: number,
 ) {
-  const dateStr = new Date(eventDate).toLocaleString('en-US', {
-    dateStyle: 'full',
-    timeStyle: 'short',
-  });
+  const dateStr = formatBangladeshDateTime(eventDate);
 
   const amountLine = isDonation
     ? '<p style="margin: 4px 0; color: #555;">🤝 <strong>Donation Event</strong></p>'
