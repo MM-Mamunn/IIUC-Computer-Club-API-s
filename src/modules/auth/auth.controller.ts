@@ -1,4 +1,5 @@
 import type { Context } from 'hono';
+import { HTTPException } from 'hono/http-exception';
 import {
   registerUser,
   loginUser,
@@ -53,19 +54,12 @@ export const uploadImage = async (c: Context) => {
     const url = await saveImage(imageUrl, c);
     return c.json(url);
   } catch (error) {
+    if (error instanceof HTTPException) {
+      return c.json({ message: error.message }, error.status);
+    }
+
     const details = error instanceof Error ? error.message : 'Unknown upload error';
     console.error('Upload error:', details);
-
-    if (details.includes('Cloudinary is not configured')) {
-      return c.json(
-        { message: 'Image upload is unavailable. Server upload credentials are not configured.' },
-        500,
-      );
-    }
-
-    if (details.includes('Uploaded file must be an image')) {
-      return c.json({ message: 'Uploaded file must be an image.' }, 400);
-    }
 
     return c.json({ message: 'Image upload failed', details }, 500);
   }

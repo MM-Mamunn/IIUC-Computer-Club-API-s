@@ -205,20 +205,24 @@ export const addSecretaries = async (
     });
   }
 
-  const existing = await db
-    .select()
-    .from(executives)
-    .where(
-      and(
-        eq(executives.number, number),
-        eq(executives.role, role),
-        eq(executives.position, position),
-      ),
-    );
-  if (existing.length > 0) {
-    throw new HTTPException(409, {
-      message: `Role ${role} in position ${position} already exists in number ${number}`,
-    });
+  // Keep one secretary per position, but allow multiple assistant secretaries in the same position.
+  if (role === 'secretary') {
+    const existingSecretaryInPosition = await db
+      .select()
+      .from(executives)
+      .where(
+        and(
+          eq(executives.number, number),
+          eq(executives.role, role),
+          eq(executives.position, position),
+        ),
+      );
+
+    if (existingSecretaryInPosition.length > 0) {
+      throw new HTTPException(409, {
+        message: `Role ${role} in position ${position} already exists in number ${number}`,
+      });
+    }
   }
 
   const [newSec] = await db
