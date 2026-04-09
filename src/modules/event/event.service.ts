@@ -174,7 +174,7 @@ export const listEvents = (committeeNumber?: string, status?: string, gender?: s
           genderRestriction: events.genderRestriction,
           createdAt: events.createdAt,
           registrationCount:
-            sql<number>`(select count(*)::int from event_registrations er where er.event_id = ${events.id})`.as(
+            sql<number>`(select count(*)::int from event_registrations er where er.event_id = ${events.id} and (case when ${events.isPaid} = false and ${events.isDonation} = false then true else er.payment_status = 'verified' end))`.as(
               'registrationCount',
             ),
         })
@@ -219,7 +219,7 @@ export const listEvents = (committeeNumber?: string, status?: string, gender?: s
         genderRestriction: events.genderRestriction,
         createdAt: events.createdAt,
         registrationCount:
-          sql<number>`(select count(*)::int from event_registrations er where er.event_id = ${events.id})`.as(
+          sql<number>`(select count(*)::int from event_registrations er where er.event_id = ${events.id} and (case when ${events.isPaid} = false and ${events.isDonation} = false then true else er.payment_status = 'verified' end))`.as(
             'registrationCount',
           ),
       })
@@ -247,7 +247,11 @@ export const getEventById = async (id: number) => {
   const [regCount] = await db
     .select({ count: count() })
     .from(eventRegistrations)
-    .where(eq(eventRegistrations.eventId, id));
+    .where(
+      event.isPaid || event.isDonation
+        ? and(eq(eventRegistrations.eventId, id), eq(eventRegistrations.paymentStatus, 'verified'))
+        : eq(eventRegistrations.eventId, id),
+    );
 
   return { ...event, registrationCount: regCount?.count ?? 0 };
 };
