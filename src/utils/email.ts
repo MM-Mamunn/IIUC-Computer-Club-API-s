@@ -158,7 +158,6 @@ export async function sendEventRegistrationEmail(
           ${paymentLine}
         </div>
         ${pendingNote}
-        <p style="color: #555;">We look forward to seeing you at the event!</p>
       </div>
       <p style="color: #999; font-size: 12px; text-align: center;">
         This is an automated message from IIUC Computer Club. Please do not reply.
