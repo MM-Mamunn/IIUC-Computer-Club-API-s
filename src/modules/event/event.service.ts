@@ -518,7 +518,7 @@ export const guestRegisterForEvent = async (
   if (existingUser) {
     throw new HTTPException(409, {
       message:
-        'An account already exists with this Student ID. Please log in to register for this event.',
+        'An account already exists with this ID. Please log in to register for this event.',
     });
   }
 

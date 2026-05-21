@@ -341,6 +341,6 @@ export const confirmRefund = async (id: number, userId: string) => {
   void id;
   void userId;
   throw new HTTPException(410, {
-    message: 'Student confirmation is disabled. Refund is finalized when staff marks it processed.',
+    message: 'Refund confirmation is disabled. Refund is finalized when staff marks it processed.',
   });
 };

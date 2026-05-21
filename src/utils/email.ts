@@ -225,7 +225,7 @@ export async function sendWelcomeEmail(
           Use the credentials below to log in to your dashboard.
         </p>
         <div style="background: #fff; border: 1px solid #e0e0e0; border-radius: 6px; padding: 16px; margin: 16px 0;">
-          <p style="margin: 4px 0;"><strong>Student ID:</strong> ${studentId}</p>
+          <p style="margin: 4px 0;"><strong>ID:</strong> ${studentId}</p>
           <p style="margin: 4px 0;"><strong>Temporary Password:</strong> <code style="background: #eee; padding: 2px 8px; border-radius: 4px; font-size: 16px;">${tempPassword}</code></p>
         </div>
         <p style="color: #d32f2f; font-weight: bold;">

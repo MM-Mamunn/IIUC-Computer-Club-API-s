@@ -17,14 +17,14 @@ export const registerUser = async (
   password: string,
   gender: string,
 ) => {
-  id = id.toUpperCase();
+  id = id.trim().toUpperCase();
   if (gender !== 'male' && gender !== 'female') {
     throw new HTTPException(400, { message: "Please specify your gender as 'male' or 'female'" });
   }
   const existing = await db.select().from(users).where(eq(users.id, id));
 
   if (existing.length > 0) {
-    throw new HTTPException(409, { message: 'An account with this Student ID already exists' });
+    throw new HTTPException(409, { message: 'An account with this ID already exists' });
   }
 
   if (password.length < 6) {
@@ -46,7 +46,7 @@ export const registerUser = async (
   return { token };
 };
 export const loginUser = async (id: string, password: string) => {
-  id = id.toUpperCase();
+  id = id.trim().toUpperCase();
   const [user] = await db.select().from(users).where(eq(users.id, id));
 
   if (!user) {
