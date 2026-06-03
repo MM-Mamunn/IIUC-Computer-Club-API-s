@@ -18,6 +18,8 @@ const ALLOWED_ORIGINS = [
   'https://www.computerclub.iiuc.ac.bd',
   'https://iiuccomputerclub.vercel.app',
   'https://www.iiuccomputerclub.vercel.app',
+  'https://iiuccomputerclub.netlify.app',
+  'https://www.iiuccomputerclub.netlify.app',
   'https://iiuc-computer-club-one.vercel.app',
   'https://www.iiuc-computer-club-one.vercel.app',
   'http://localhost:3000',
