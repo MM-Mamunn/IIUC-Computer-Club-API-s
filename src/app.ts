@@ -14,6 +14,8 @@ import { invalidate } from './utils/cache';
 const app = new Hono();
 
 const ALLOWED_ORIGINS = [
+  'https://computerclub.iiuc.ac.bd',
+  'https://www.computerclub.iiuc.ac.bd',
   'https://iiuccomputerclub.vercel.app',
   'https://www.iiuccomputerclub.vercel.app',
   'https://iiuc-computer-club-one.vercel.app',
