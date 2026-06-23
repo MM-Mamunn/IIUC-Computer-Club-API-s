@@ -28,6 +28,8 @@ import {
   deleteEventExpense,
   getEventExpenses,
   submitExpenseClaim,
+  updateExpenseClaim,
+  deleteExpenseClaim,
   reviewExpenseClaim,
   markClaimPaid,
   getEventClaims,
@@ -551,6 +553,43 @@ export const submitClaimController = async (c: Context) => {
 
   const claim = await submitExpenseClaim(id, user.id, data);
   return c.json({ claim }, 201);
+};
+
+export const updateClaimController = async (c: Context) => {
+  const claimId = parseInt(c.req.param('claimId'));
+  if (isNaN(claimId)) return c.json({ message: 'Invalid claim ID' }, 400);
+  const user = c.get('user');
+
+  const contentType = c.req.header('content-type') ?? '';
+  let data: { description?: string; amount?: number; proofImage?: string };
+
+  if (contentType.includes('multipart/form-data')) {
+    const formData = await c.req.formData();
+    let proofImage: string | undefined = undefined;
+    const proofFile = formData.get('proof') as File | null;
+    if (proofFile && proofFile.size > 0) {
+      proofImage = await uploadImageToCloudinary(proofFile);
+    }
+    data = {
+      description: (formData.get('description') as string) || undefined,
+      amount: formData.get('amount') ? Number(formData.get('amount')) : undefined,
+      proofImage,
+    };
+  } else {
+    data = await c.req.json();
+  }
+
+  const claim = await updateExpenseClaim(claimId, user.id, data);
+  return c.json({ claim }, 200);
+};
+
+export const deleteClaimController = async (c: Context) => {
+  const claimId = parseInt(c.req.param('claimId'));
+  if (isNaN(claimId)) return c.json({ message: 'Invalid claim ID' }, 400);
+  const user = c.get('user');
+
+  const claim = await deleteExpenseClaim(claimId, user.id);
+  return c.json({ claim }, 200);
 };
 
 export const reviewClaimController = async (c: Context) => {

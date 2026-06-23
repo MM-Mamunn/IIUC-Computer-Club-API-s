@@ -416,14 +416,14 @@ async function seedMassive() {
       {
         id: maleIds[maleIdx++],
         number: comNum,
-        role: 'assistant secretary',
+        role: 'assistant secretary 1',
         position: 'public relations',
         assignedBy: presId,
       },
       {
         id: maleIds[maleIdx++],
         number: comNum,
-        role: 'assistant secretary',
+        role: 'assistant secretary 2',
         position: 'logistics',
         assignedBy: presId,
       },
@@ -482,7 +482,7 @@ async function seedMassive() {
       {
         id: femaleIds[femaleIdx++],
         number: comNum,
-        role: 'assistant secretary',
+        role: 'assistant secretary 1',
         position: 'public relations',
         assignedBy: presId,
       },

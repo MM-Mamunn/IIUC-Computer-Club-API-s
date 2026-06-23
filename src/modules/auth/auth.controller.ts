@@ -15,14 +15,16 @@ import { uploadImageToCloudinary } from '../../utils/uploadImage';
 
 export const register = async (c: Context) => {
   const {
-    id: id,
-    name: name,
-    email: email,
-    password: password,
-    gender: gender,
+    id,
+    name,
+    email,
+    password,
+    gender,
+    idCard,
+    department,
   } = await c.req.json();
 
-  const user = await registerUser(id, name, email, password, gender);
+  const user = await registerUser(id, name, email, password, gender, idCard, department);
 
   return c.json({ token: user.token.token }, 201);
 };
@@ -32,6 +34,30 @@ export const login = async (c: Context) => {
   const { id, password } = await c.req.json();
   const result = await loginUser(id, password);
   return c.json(result);
+};
+
+export const uploadImagePublic = async (c: Context) => {
+  const contentType = c.req.header('content-type') ?? '';
+
+  if (!contentType.includes('multipart/form-data')) {
+    return c.json({ message: 'Content-Type must be multipart/form-data' }, 400);
+  }
+
+  const formData = await c.req.formData();
+  const file = formData.get('image');
+
+  if (!(file instanceof File) || file.size === 0) {
+    return c.json({ message: 'Image file is required' }, 400);
+  }
+
+  try {
+    const imageUrl = await uploadImageToCloudinary(file);
+    return c.json({ imageUrl }, 200);
+  } catch (error) {
+    const details = error instanceof Error ? error.message : 'Unknown upload error';
+    console.error('Upload error:', details);
+    return c.json({ message: 'Image upload failed', details }, 500);
+  }
 };
 
 export const uploadImage = async (c: Context) => {

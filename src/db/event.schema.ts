@@ -339,6 +339,9 @@ export const expenseClaims = pgTable('expense_claims', {
 
   /** Proof of payment image URL (e.g. bank transfer screenshot) */
   paymentProof: text('payment_proof'),
+
+  /** JSON history of changes to the claim */
+  auditHistory: jsonb('audit_history'),
 });
 
 /* =========================

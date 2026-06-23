@@ -3,6 +3,7 @@ import {
   register,
   login,
   uploadImage,
+  uploadImagePublic,
   me,
   updateUserController,
   changePass,
@@ -19,6 +20,7 @@ router.post('/register', register);
 router.post('/login', login);
 router.post('/forgot-password', forgotPass);
 router.post('/reset-password', resetPass);
+router.post('/uploadimg-public', uploadImagePublic);
 router.post('/uploadimg', authMiddleware, uploadImage);
 router.get('/me', authMiddleware, me);
 

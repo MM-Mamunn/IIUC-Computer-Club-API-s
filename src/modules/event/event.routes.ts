@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { authMiddleware } from '../../middlewares/auth.middleware';
-import { requireRole } from '../../middlewares/role.middleware';
+import { requireRole, requireAdminOrEventManager } from '../../middlewares/role.middleware';
 import { getRolesByPriorityRange } from '../global/global.service';
 import {
   create,
@@ -33,6 +33,8 @@ import {
   deleteExpenseController,
   listExpensesController,
   submitClaimController,
+  updateClaimController,
+  deleteClaimController,
   reviewClaimController,
   markClaimPaidController,
   listClaimsController,
@@ -133,14 +135,14 @@ router.post('/payment/sslcommerz/cancel', async (c: Context) => {
 // ─── Executive-only (priority ≤ 4) ───
 router.post('/', authMiddleware, requireRole(await getRolesByPriorityRange(1, 4)), create);
 
-router.put('/:id', authMiddleware, requireRole(await getRolesByPriorityRange(1, 4)), update);
+router.put('/:id', authMiddleware, requireAdminOrEventManager(await getRolesByPriorityRange(1, 4)), update);
 
 router.delete('/:id', authMiddleware, requireRole(await getRolesByPriorityRange(1, 2)), remove);
 
 router.get(
   '/:id/registrations',
   authMiddleware,
-  requireRole(await getRolesByPriorityRange(1, 4)),
+  requireAdminOrEventManager(await getRolesByPriorityRange(1, 4)),
   registrations,
 );
 
@@ -148,7 +150,7 @@ router.get(
 router.put(
   '/:id/verify-payment',
   authMiddleware,
-  requireRole(await getRolesByPriorityRange(1, 4)),
+  requireAdminOrEventManager(await getRolesByPriorityRange(1, 4)),
   verifyPaymentController,
 );
 
@@ -156,7 +158,7 @@ router.put(
 router.put(
   '/:id/registrations/:userId/responses',
   authMiddleware,
-  requireRole(await getRolesByPriorityRange(1, 4)),
+  requireAdminOrEventManager(await getRolesByPriorityRange(1, 4)),
   updateRegistrationResponsesController,
 );
 
@@ -164,14 +166,14 @@ router.put(
 router.post(
   '/:id/duties',
   authMiddleware,
-  requireRole(await getRolesByPriorityRange(1, 3)),
+  requireAdminOrEventManager(await getRolesByPriorityRange(1, 3)),
   assignDutyController,
 );
 
 router.delete(
   '/:id/duties',
   authMiddleware,
-  requireRole(await getRolesByPriorityRange(1, 3)),
+  requireAdminOrEventManager(await getRolesByPriorityRange(1, 3)),
   removeDutyController,
 );
 
@@ -201,7 +203,7 @@ router.delete(
 router.get(
   '/:id/managers',
   authMiddleware,
-  requireRole(await getRolesByPriorityRange(1, 4)),
+  requireAdminOrEventManager(await getRolesByPriorityRange(1, 4)),
   managersController,
 );
 
@@ -209,41 +211,48 @@ router.get(
 router.get(
   '/:id/expenses',
   authMiddleware,
-  requireRole(await getRolesByPriorityRange(1, 5)),
+  requireAdminOrEventManager(await getRolesByPriorityRange(1, 5)),
   listExpensesController,
 );
 router.post(
   '/:id/expenses',
   authMiddleware,
-  requireRole(await getRolesByPriorityRange(1, 4)),
+  requireAdminOrEventManager(await getRolesByPriorityRange(1, 4)),
   addExpenseController,
 );
 router.put(
   '/:id/expenses/:expenseId',
   authMiddleware,
-  requireRole(await getRolesByPriorityRange(1, 4)),
+  requireAdminOrEventManager(await getRolesByPriorityRange(1, 4)),
   updateExpenseController,
 );
 router.delete(
   '/:id/expenses/:expenseId',
   authMiddleware,
-  requireRole(await getRolesByPriorityRange(1, 4)),
+  requireAdminOrEventManager(await getRolesByPriorityRange(1, 4)),
   deleteExpenseController,
 );
 
 // ─── Financial: Expense Claims ───
 router.get('/me/claims', authMiddleware, myClaimsController);
 router.post('/:id/claims', authMiddleware, submitClaimController);
+router.put('/:id/claims/:claimId', authMiddleware, updateClaimController);
+router.delete(
+  '/:id/claims/:claimId',
+  authMiddleware,
+  requireAdminOrEventManager(await getRolesByPriorityRange(1, 3)),
+  deleteClaimController,
+);
 router.get(
   '/:id/claims',
   authMiddleware,
-  requireRole(await getRolesByPriorityRange(1, 5)),
+  requireAdminOrEventManager(await getRolesByPriorityRange(1, 5)),
   listClaimsController,
 );
 router.put(
   '/:id/claims/:claimId/review',
   authMiddleware,
-  requireRole(await getRolesByPriorityRange(1, 5)),
+  requireAdminOrEventManager(await getRolesByPriorityRange(1, 5)),
   reviewClaimController,
 );
 router.put(
@@ -257,25 +266,25 @@ router.put(
 router.get(
   '/:id/financials',
   authMiddleware,
-  requireRole(await getRolesByPriorityRange(1, 5)),
+  requireAdminOrEventManager(await getRolesByPriorityRange(1, 5)),
   financialsController,
 );
 router.post(
   '/:id/voucher',
   authMiddleware,
-  requireRole(await getRolesByPriorityRange(1, 5)),
+  requireAdminOrEventManager(await getRolesByPriorityRange(1, 5)),
   generateVoucherController,
 );
 router.put(
   '/:id/voucher',
   authMiddleware,
-  requireRole(await getRolesByPriorityRange(1, 5)),
+  requireAdminOrEventManager(await getRolesByPriorityRange(1, 5)),
   regenerateVoucherController,
 );
 router.get(
   '/:id/voucher',
   authMiddleware,
-  requireRole(await getRolesByPriorityRange(1, 5)),
+  requireAdminOrEventManager(await getRolesByPriorityRange(1, 5)),
   getVoucherController,
 );
 

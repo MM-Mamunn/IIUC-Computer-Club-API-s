@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { authMiddleware } from '../../middlewares/auth.middleware';
 import { requireRole } from '../../middlewares/role.middleware';
-import { search, getUser, stats, budgetStats } from './user.controller';
+import { search, directory, getUser, stats, budgetStats } from './user.controller';
 import { getRolesByPriorityRange } from '../global/global.service';
 
 const router = new Hono();
@@ -20,6 +20,14 @@ router.get(
 );
 
 router.get('/test', (c) => c.json({ message: 'Working test' }));
+
+// Directory search for leadership
+router.get(
+  '/directory',
+  authMiddleware,
+  requireRole(await getRolesByPriorityRange(1, 4)),
+  directory,
+);
 
 // Search users
 router.get('/search', authMiddleware, search);

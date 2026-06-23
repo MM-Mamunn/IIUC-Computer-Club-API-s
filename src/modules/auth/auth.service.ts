@@ -16,8 +16,19 @@ export const registerUser = async (
   email: string,
   password: string,
   gender: string,
+  idCard?: string,
+  department?: string,
 ) => {
-  id = id.trim().toUpperCase();
+  if (id.trim() !== id) {
+    throw new HTTPException(400, { message: 'ID cannot contain leading or trailing spaces' });
+  }
+  if (/\s/.test(id)) {
+    throw new HTTPException(400, { message: 'ID cannot contain spaces' });
+  }
+  id = id.toUpperCase();
+  if (id.length < 2) {
+    throw new HTTPException(400, { message: 'ID must be at least 2 characters long' });
+  }
   if (gender !== 'male' && gender !== 'female') {
     throw new HTTPException(400, { message: "Please specify your gender as 'male' or 'female'" });
   }
@@ -35,7 +46,7 @@ export const registerUser = async (
 
   const [newUser] = await db
     .insert(users)
-    .values({ id, name: name, email: email, password: hashed, gender: gender })
+    .values({ id, name, email, password: hashed, gender, idCard, department })
     .returning();
 
   if (!newUser) {
@@ -204,6 +215,8 @@ export const showMe = async (c: Context) => {
       email: users.email,
       gender: users.gender,
       profileImage: users.profileImage,
+      idCard: users.idCard,
+      department: users.department,
       description: users.description,
       createdat: users.createdAt,
     })

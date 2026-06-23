@@ -205,7 +205,7 @@ export const addSecretaries = async (
     });
   }
 
-  // Keep one secretary per position, but allow multiple assistant secretaries in the same position.
+  // Keep one secretary per position
   if (role === 'secretary') {
     const existingSecretaryInPosition = await db
       .select()
@@ -218,9 +218,28 @@ export const addSecretaries = async (
         ),
       );
 
-    if (existingSecretaryInPosition.length > 0) {
+    if (existingSecretaryInPosition.length > 0 && existingSecretaryInPosition[0].id !== id) {
       throw new HTTPException(409, {
         message: `Role ${role} in position ${position} already exists in number ${number}`,
+      });
+    }
+  }
+
+  // Only one member can occupy a specific assistant secretary slot per committee
+  if (role.startsWith('assistant secretary')) {
+    const existingAsstSec = await db
+      .select()
+      .from(executives)
+      .where(
+        and(
+          eq(executives.number, number),
+          eq(executives.role, role),
+        ),
+      );
+
+    if (existingAsstSec.length > 0 && existingAsstSec[0].id !== id) {
+      throw new HTTPException(409, {
+        message: `Role ${role} is already occupied in committee ${number}`,
       });
     }
   }

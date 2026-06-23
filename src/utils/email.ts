@@ -628,3 +628,58 @@ export async function sendRefundStatusEmail(
     throw err;
   }
 }
+
+/** Send duty or event manager assignment notification email */
+export async function sendDutyAssignmentEmail(
+  to: string,
+  name: string,
+  eventTitle: string,
+  assignedRole: string,
+  eventDate: string,
+  venue: string | null,
+  dashboardLink: string,
+) {
+  const dateStr = formatBangladeshDateTime(eventDate);
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <h1 style="color: #1a1a1a; margin: 0;">IIUC Computer Club</h1>
+      </div>
+      <div style="background: #fdf6ec; border-radius: 8px; padding: 24px; margin-bottom: 16px;">
+        <h2 style="color: #b45309; margin-top: 0;">New Event Assignment 📅</h2>
+        <p style="color: #555; line-height: 1.6;">
+          Hi <strong>${name}</strong>, you have been assigned a new role/duty for the following event:
+        </p>
+        <div style="background: #fff; border: 1px solid #fcd34d; border-radius: 6px; padding: 16px; margin: 16px 0;">
+          <h3 style="margin-top: 0; color: #1a1a1a;">${eventTitle}</h3>
+          <p style="margin: 4px 0; color: #555;">📋 <strong>Assigned Role:</strong> ${assignedRole}</p>
+          <p style="margin: 4px 0; color: #555;">📅 <strong>Event Date:</strong> ${dateStr}</p>
+          ${venue ? `<p style="margin: 4px 0; color: #555;">📍 <strong>Event Location:</strong> ${venue}</p>` : ''}
+        </div>
+        <p style="color: #555; line-height: 1.6;">
+          You can view and manage your assigned duties inside your dashboard:
+        </p>
+        <div style="text-align: center; margin: 24px 0;">
+          <a href="${dashboardLink}" style="background: #1976d2; color: #fff; text-decoration: none; padding: 12px 32px; border-radius: 6px; font-weight: bold; display: inline-block;">
+            Go to Dashboard
+          </a>
+        </div>
+      </div>
+      <p style="color: #999; font-size: 12px; text-align: center;">
+        This is an automated message from IIUC Computer Club. Please do not reply.
+      </p>
+    </div>
+  `;
+
+  try {
+    await enqueueMail({
+      from: FROM,
+      to,
+      subject: `New Event Assignment: ${assignedRole} — ${eventTitle}`,
+      html,
+    });
+  } catch (err) {
+    console.error('Failed to send duty assignment email:', err);
+    throw err;
+  }
+}

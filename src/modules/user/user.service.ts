@@ -2,8 +2,104 @@ import { db } from '../../config/db';
 import { users, executives, committee } from '../../db/schema';
 import { roles as rolesTable } from '../../db/schema';
 import { events, eventRegistrations, eventExpenses, vouchers } from '../../db/event.schema';
-import { eq, and, ilike, or, count, isNull, sum, inArray } from 'drizzle-orm';
+import { eq, and, ilike, or, count, isNull, sum, inArray, desc, type SQL } from 'drizzle-orm';
 import { cached } from '../../utils/cache';
+
+// ─── User Directory ───
+export const getUserDirectory = async (params: {
+  page: number;
+  limit: number;
+  search?: string;
+  department?: string;
+  committee?: string;
+}) => {
+  const { page, limit, search, department, committee: commNumber } = params;
+  const offset = (page - 1) * limit;
+
+  const conditions: SQL[] = [];
+
+  if (search) {
+    conditions.push(
+      or(
+        ilike(users.id, `%${search}%`),
+        ilike(users.name, `%${search}%`),
+        ilike(users.email, `%${search}%`)
+      )!
+    );
+  }
+
+  if (department) {
+    conditions.push(ilike(users.department, `%${department}%`));
+  }
+
+  if (commNumber) {
+    const subquery = db
+      .select({ id: executives.id })
+      .from(executives)
+      .where(eq(executives.number, commNumber));
+    conditions.push(inArray(users.id, subquery));
+  }
+
+  const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+  const [countResult] = await db
+    .select({ count: count() })
+    .from(users)
+    .where(whereClause);
+
+  const total = countResult?.count ?? 0;
+
+  const userResults = await db
+    .select({
+      id: users.id,
+      name: users.name,
+      email: users.email,
+      gender: users.gender,
+      profileImage: users.profileImage,
+      idCard: users.idCard,
+      department: users.department,
+      createdAt: users.createdAt,
+    })
+    .from(users)
+    .where(whereClause)
+    .orderBy(desc(users.createdAt))
+    .limit(limit)
+    .offset(offset);
+
+  const userIds = userResults.map((u) => u.id);
+  const execMap = new Map<string, any[]>();
+
+  if (userIds.length > 0) {
+    const execs = await db
+      .select({
+        id: executives.id,
+        role: executives.role,
+        position: executives.position,
+        number: executives.number,
+      })
+      .from(executives)
+      .where(inArray(executives.id, userIds));
+
+    for (const e of execs) {
+      const arr = execMap.get(e.id) || [];
+      arr.push({ role: e.role, position: e.position, committeeNumber: e.number });
+      execMap.set(e.id, arr);
+    }
+  }
+
+  const usersWithExecDetails = userResults.map((u) => ({
+    ...u,
+    executives: execMap.get(u.id) || [],
+  }));
+
+  return {
+    users: usersWithExecDetails,
+    total,
+    page,
+    limit,
+    totalPages: Math.ceil(total / limit),
+  };
+};
 
 // ─── Search Users ───
 export const searchUsers = async (query: string, committeeNumber?: string, callerRole?: string, executivesOnly?: boolean) => {

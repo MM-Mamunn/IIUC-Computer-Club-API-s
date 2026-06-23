@@ -87,7 +87,7 @@ const CURRENT_MALE_COMMITTEE_2026 = [
   {
     id: 'C231152',
     name: 'M M Sadik Islam',
-    role: 'assistant secretary',
+    role: 'assistant secretary 1',
     position: 'assistant office secretary',
   },
   {
@@ -99,7 +99,7 @@ const CURRENT_MALE_COMMITTEE_2026 = [
   {
     id: 'C241022',
     name: 'Arifur Rahman',
-    role: 'assistant secretary',
+    role: 'assistant secretary 1',
     position: 'assistant finance secretary',
   },
   {
@@ -111,13 +111,13 @@ const CURRENT_MALE_COMMITTEE_2026 = [
   {
     id: 'C231139',
     name: 'Abdullah Al Shaimon',
-    role: 'assistant secretary',
+    role: 'assistant secretary 1',
     position: 'assistant innovation & tech secretary',
   },
   {
     id: 'C231022',
     name: 'Adnan Mahmud Alvee',
-    role: 'assistant secretary',
+    role: 'assistant secretary 2',
     position: 'assistant innovation & tech secretary',
   },
   {
@@ -129,13 +129,13 @@ const CURRENT_MALE_COMMITTEE_2026 = [
   {
     id: 'C231315',
     name: 'A F M Sayeed Islam',
-    role: 'assistant secretary',
+    role: 'assistant secretary 1',
     position: 'assistant debate secretary',
   },
   {
     id: 'C241162',
     name: 'Shakib Jishan Ranik',
-    role: 'assistant secretary',
+    role: 'assistant secretary 2',
     position: 'assistant debate secretary',
   },
   {
@@ -147,7 +147,7 @@ const CURRENT_MALE_COMMITTEE_2026 = [
   {
     id: 'C253159',
     name: 'Md. Al-Amin',
-    role: 'assistant secretary',
+    role: 'assistant secretary 1',
     position: 'assistant cultural secretary',
   },
   {
@@ -159,7 +159,7 @@ const CURRENT_MALE_COMMITTEE_2026 = [
   {
     id: 'C223414',
     name: 'Md. Abdullah Al Mamun Dinar',
-    role: 'assistant secretary',
+    role: 'assistant secretary 1',
     position: 'assistant press and publication secretary',
   },
   {
@@ -171,13 +171,13 @@ const CURRENT_MALE_COMMITTEE_2026 = [
   {
     id: 'C223416',
     name: 'Md. Foisal Islam Fahad',
-    role: 'assistant secretary',
+    role: 'assistant secretary 1',
     position: 'assistant sports secretary',
   },
   {
     id: 'C241124',
     name: 'Anoawarul Islam Sagar',
-    role: 'assistant secretary',
+    role: 'assistant secretary 2',
     position: 'assistant sports secretary',
   },
   {
@@ -189,13 +189,13 @@ const CURRENT_MALE_COMMITTEE_2026 = [
   {
     id: 'C231153',
     name: 'Sajid Hossen',
-    role: 'assistant secretary',
+    role: 'assistant secretary 1',
     position: 'assistant logistics & organizing secretary',
   },
   {
     id: 'C243114',
     name: 'Md. Saimon Sobhan Shuvo',
-    role: 'assistant secretary',
+    role: 'assistant secretary 2',
     position: 'assistant logistics & organizing secretary',
   },
   {
@@ -207,19 +207,19 @@ const CURRENT_MALE_COMMITTEE_2026 = [
   {
     id: 'C231325',
     name: 'Shahriar Mohammad Aqib',
-    role: 'assistant secretary',
+    role: 'assistant secretary 1',
     position: 'assistant creative and design secretary',
   },
   {
     id: 'C243217',
     name: 'Md. Shahraj Mashrafe Mashfi',
-    role: 'assistant secretary',
+    role: 'assistant secretary 2',
     position: 'assistant creative and design secretary',
   },
   {
     id: 'C243116',
     name: 'Mohammad Rasib Iftekhar Nabil',
-    role: 'assistant secretary',
+    role: 'assistant secretary 3',
     position: 'assistant creative and design secretary',
   },
   {
@@ -231,7 +231,7 @@ const CURRENT_MALE_COMMITTEE_2026 = [
   {
     id: 'C241268',
     name: 'Sakibul Islam Sakif',
-    role: 'assistant secretary',
+    role: 'assistant secretary 1',
     position: 'assistant photography secretary',
   },
   {
@@ -243,13 +243,13 @@ const CURRENT_MALE_COMMITTEE_2026 = [
   {
     id: 'C223032',
     name: 'Mohammed Shakawat Hossen',
-    role: 'assistant secretary',
+    role: 'assistant secretary 1',
     position: 'assistant research and development secretary',
   },
   {
     id: 'C231068',
     name: 'Hasnain Kabir Nabil',
-    role: 'assistant secretary',
+    role: 'assistant secretary 2',
     position: 'assistant research and development secretary',
   },
   {
@@ -261,13 +261,13 @@ const CURRENT_MALE_COMMITTEE_2026 = [
   {
     id: 'C223168',
     name: 'Mohammad Saiful Islam',
-    role: 'assistant secretary',
+    role: 'assistant secretary 1',
     position: 'assistant event secretary',
   },
   {
     id: 'C241155',
     name: 'Idrath Hossan Zidan',
-    role: 'assistant secretary',
+    role: 'assistant secretary 2',
     position: 'assistant event secretary',
   },
   {
@@ -279,7 +279,7 @@ const CURRENT_MALE_COMMITTEE_2026 = [
   {
     id: 'C241181',
     name: 'Mahin Mashrafe Maruf',
-    role: 'assistant secretary',
+    role: 'assistant secretary 1',
     position: 'assistant public relations secretary',
   },
   {
@@ -291,13 +291,13 @@ const CURRENT_MALE_COMMITTEE_2026 = [
   {
     id: 'C231145',
     name: 'Taseen Ahmed',
-    role: 'assistant secretary',
+    role: 'assistant secretary 1',
     position: 'assistant social welfare secretary',
   },
   {
     id: 'C241175',
     name: 'Abdullah Al Mahmud Sayem',
-    role: 'assistant secretary',
+    role: 'assistant secretary 2',
     position: 'assistant social welfare secretary',
   },
   {
@@ -482,7 +482,9 @@ async function seed() {
       description: 'Third assistant general secretary',
     },
     { role: 'secretary', priority: 5, description: 'Secretary' },
-    { role: 'assistant secretary', priority: 6, description: 'Assistant secretary' },
+    { role: 'assistant secretary 1', priority: 6, description: 'Assistant secretary 1' },
+    { role: 'assistant secretary 2', priority: 6, description: 'Assistant secretary 2' },
+    { role: 'assistant secretary 3', priority: 6, description: 'Assistant secretary 3' },
     { role: 'executive member', priority: 7, description: 'Executive member' },
   ];
   await db.insert(roles).values(roleList).onConflictDoNothing();

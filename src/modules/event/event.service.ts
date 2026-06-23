@@ -21,6 +21,7 @@ import {
   sendEventRegistrationEmail,
   sendPaymentConfirmedEmail,
   sendPaymentRejectionEmail,
+  sendDutyAssignmentEmail,
 } from '../../utils/email';
 import { getBangladeshDayKey, getBangladeshYear } from '../../utils/datetime';
 import { generateToken, verifyToken } from '../../utils/jwt';
@@ -398,8 +399,12 @@ export const registerForEvent = async (
     .select()
     .from(eventRegistrations)
     .where(and(eq(eventRegistrations.eventId, eventId), eq(eventRegistrations.userId, userId)));
-  if (existing)
-    throw new HTTPException(409, { message: 'You are already registered for this event' });
+
+  if (existing) {
+    if (existing.paymentStatus !== 'failed') {
+      throw new HTTPException(409, { message: 'You are already registered for this event' });
+    }
+  }
 
   // For paid events with manual payment, require transaction ID
   // For donation events, require a donation amount > 0
@@ -421,18 +426,45 @@ export const registerForEvent = async (
       paymentMethod === 'sslcommerz' ? 'pending' : transactionId ? 'pending' : 'pending';
   }
 
-  const [reg] = await db
-    .insert(eventRegistrations)
-    .values({
-      eventId,
-      userId,
-      paymentStatus,
-      paymentMethod: event.isPaid || event.isDonation ? (paymentMethod ?? null) : null,
-      transactionId: transactionId ?? null,
-      donationAmount: event.isDonation ? (donationAmount ?? null) : null,
-      customFieldResponses: customFieldResponses ?? null,
-    })
-    .returning();
+  let reg;
+  if (existing && existing.paymentStatus === 'failed') {
+    const updatedHistory: any = existing.rejectionHistory || [];
+    updatedHistory.push({
+      reason: existing.rejectionReason,
+      type: existing.rejectionType,
+      rejectedAt: new Date().toISOString(),
+      transactionId: existing.transactionId,
+      paymentMethod: existing.paymentMethod,
+    });
+
+    [reg] = await db
+      .update(eventRegistrations)
+      .set({
+        paymentStatus,
+        paymentMethod: event.isPaid || event.isDonation ? (paymentMethod ?? null) : null,
+        transactionId: transactionId ?? null,
+        donationAmount: event.isDonation ? (donationAmount ?? null) : null,
+        customFieldResponses: customFieldResponses ?? null,
+        rejectionReason: null,
+        rejectionType: null,
+        rejectionHistory: updatedHistory,
+      })
+      .where(and(eq(eventRegistrations.eventId, eventId), eq(eventRegistrations.userId, userId)))
+      .returning();
+  } else {
+    [reg] = await db
+      .insert(eventRegistrations)
+      .values({
+        eventId,
+        userId,
+        paymentStatus,
+        paymentMethod: event.isPaid || event.isDonation ? (paymentMethod ?? null) : null,
+        transactionId: transactionId ?? null,
+        donationAmount: event.isDonation ? (donationAmount ?? null) : null,
+        customFieldResponses: customFieldResponses ?? null,
+      })
+      .returning();
+  }
 
   invalidateEventCaches();
 
@@ -648,9 +680,27 @@ export const submitPayment = async (
     });
   }
 
+  const updatedHistory: any = reg.rejectionHistory || [];
+  if (reg.paymentStatus === 'failed') {
+    updatedHistory.push({
+      reason: reg.rejectionReason,
+      type: reg.rejectionType,
+      rejectedAt: new Date().toISOString(),
+      transactionId: reg.transactionId,
+      paymentMethod: reg.paymentMethod,
+    });
+  }
+
   const [updated] = await db
     .update(eventRegistrations)
-    .set({ paymentMethod, transactionId, paymentStatus: 'pending' })
+    .set({
+      paymentMethod,
+      transactionId,
+      paymentStatus: 'pending',
+      rejectionReason: null,
+      rejectionType: null,
+      rejectionHistory: updatedHistory,
+    })
     .where(and(eq(eventRegistrations.eventId, eventId), eq(eventRegistrations.userId, userId)))
     .returning();
 
@@ -1213,6 +1263,22 @@ export const assignDuty = async (
     .values({ eventId, userId, duty, description, assignedBy: assigner.id })
     .returning();
 
+  // Send notification email asynchronously
+  try {
+    const dashboardLink = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/dashboard`;
+    await sendDutyAssignmentEmail(
+      userExists.email,
+      userExists.name,
+      event.title,
+      duty,
+      event.eventDate.toISOString(),
+      event.venue,
+      dashboardLink,
+    );
+  } catch (emailErr) {
+    console.error('Failed to send duty assignment email notification:', emailErr);
+  }
+
   return dutyRecord;
 };
 
@@ -1297,11 +1363,17 @@ export const getMyRegistrations = async (userId: string) => {
       eventStatus: events.status,
       venue: events.venue,
       isPaid: events.isPaid,
+      isDonation: events.isDonation,
       fee: events.fee,
       registeredAt: eventRegistrations.registeredAt,
       paymentStatus: eventRegistrations.paymentStatus,
       paymentMethod: eventRegistrations.paymentMethod,
       transactionId: eventRegistrations.transactionId,
+      donationAmount: eventRegistrations.donationAmount,
+      customFieldResponses: eventRegistrations.customFieldResponses,
+      rejectionReason: eventRegistrations.rejectionReason,
+      rejectionType: eventRegistrations.rejectionType,
+      rejectionHistory: eventRegistrations.rejectionHistory,
     })
     .from(eventRegistrations)
     .innerJoin(events, eq(eventRegistrations.eventId, events.id))
@@ -1356,6 +1428,23 @@ export const addEventManager = async (eventId: number, userId: string, assignedB
     throw new HTTPException(409, { message: 'User is already a manager for this event' });
 
   const [row] = await db.insert(eventManagers).values({ eventId, userId, assignedBy }).returning();
+
+  // Send notification email asynchronously
+  try {
+    const dashboardLink = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/dashboard`;
+    await sendDutyAssignmentEmail(
+      userExists.email,
+      userExists.name,
+      event.title,
+      'Event Manager',
+      event.eventDate.toISOString(),
+      event.venue,
+      dashboardLink,
+    );
+  } catch (emailErr) {
+    console.error('Failed to send event manager email notification:', emailErr);
+  }
+
   return row;
 };
 
@@ -1588,8 +1677,8 @@ export const reviewExpenseClaim = async (
 ) => {
   const [claim] = await db.select().from(expenseClaims).where(eq(expenseClaims.id, claimId));
   if (!claim) throw new HTTPException(404, { message: 'Claim not found' });
-  if (claim.status !== 'pending') {
-    throw new HTTPException(400, { message: `Claim is already ${claim.status}` });
+  if (claim.status !== 'pending' && claim.status !== 'rejected' && claim.status !== 'approved') {
+    throw new HTTPException(400, { message: `Claim is already ${claim.status} and cannot be reviewed` });
   }
 
   // Check committee closed
@@ -1607,6 +1696,16 @@ export const reviewExpenseClaim = async (
   if (evt?.financesLocked)
     throw new HTTPException(403, { message: 'Finances are locked for this event' });
 
+  const updatedHistory: any = claim.auditHistory || [];
+  updatedHistory.push({
+    action: approved ? 'approved' : 'rejected',
+    actorId: reviewerId,
+    timestamp: new Date().toISOString(),
+    previousStatus: claim.status,
+    newStatus: approved ? 'approved' : 'rejected',
+    notes: notes ?? null,
+  });
+
   const [updated] = await db
     .update(expenseClaims)
     .set({
@@ -1614,6 +1713,7 @@ export const reviewExpenseClaim = async (
       reviewedBy: reviewerId,
       reviewedAt: new Date(),
       notes: notes ?? null,
+      auditHistory: updatedHistory,
     })
     .where(eq(expenseClaims.id, claimId))
     .returning();
@@ -1647,6 +1747,15 @@ export const markClaimPaid = async (
   if (evtForPay?.financesLocked)
     throw new HTTPException(403, { message: 'Finances are locked for this event' });
 
+  const updatedHistory: any = claim.auditHistory || [];
+  updatedHistory.push({
+    action: 'paid',
+    actorId: paidByUserId,
+    timestamp: new Date().toISOString(),
+    previousStatus: claim.status,
+    newStatus: 'paid',
+  });
+
   const [updated] = await db
     .update(expenseClaims)
     .set({
@@ -1654,6 +1763,7 @@ export const markClaimPaid = async (
       paidBy: paidByUserId,
       paidAt: new Date(),
       paymentProof: paymentProof ?? null,
+      auditHistory: updatedHistory,
     })
     .where(eq(expenseClaims.id, claimId))
     .returning();
@@ -1667,6 +1777,90 @@ export const markClaimPaid = async (
     receiptImage: claim.proofImage,
     submittedBy: claim.userId,
   });
+
+  return updated;
+};
+
+export const updateExpenseClaim = async (
+  claimId: number,
+  userId: string,
+  data: { description?: string; amount?: number; proofImage?: string },
+) => {
+  const [claim] = await db.select().from(expenseClaims).where(eq(expenseClaims.id, claimId));
+  if (!claim) throw new HTTPException(404, { message: 'Claim not found' });
+
+  if (claim.userId !== userId) {
+    throw new HTTPException(403, { message: 'Only the creator of the claim can edit it' });
+  }
+
+  if (claim.status !== 'rejected' && claim.status !== 'pending') {
+    throw new HTTPException(400, { message: `Claim is already ${claim.status} and cannot be edited` });
+  }
+
+  const [event] = await db.select().from(events).where(eq(events.id, claim.eventId));
+  if (!event) throw new HTTPException(404, { message: 'Event not found' });
+  await assertCommitteeOpen(event.committeeNumber);
+  if (event.financesLocked) {
+    throw new HTTPException(403, { message: 'Finances are locked for this event' });
+  }
+
+  const updatedHistory: any = claim.auditHistory || [];
+  updatedHistory.push({
+    action: 'updated',
+    actorId: userId,
+    timestamp: new Date().toISOString(),
+    previousStatus: claim.status,
+    newStatus: 'pending',
+    changes: {
+      description: data.description !== claim.description ? data.description : undefined,
+      amount: data.amount !== claim.amount ? data.amount : undefined,
+      proofImage: data.proofImage !== claim.proofImage ? data.proofImage : undefined,
+    },
+  });
+
+  const [updated] = await db
+    .update(expenseClaims)
+    .set({
+      description: data.description ?? claim.description,
+      amount: data.amount ?? claim.amount,
+      proofImage: data.proofImage ?? claim.proofImage,
+      status: 'pending',
+      auditHistory: updatedHistory,
+    })
+    .where(eq(expenseClaims.id, claimId))
+    .returning();
+
+  return updated;
+};
+
+export const deleteExpenseClaim = async (claimId: number, actorId: string) => {
+  const [claim] = await db.select().from(expenseClaims).where(eq(expenseClaims.id, claimId));
+  if (!claim) throw new HTTPException(404, { message: 'Claim not found' });
+
+  const [event] = await db.select().from(events).where(eq(events.id, claim.eventId));
+  if (!event) throw new HTTPException(404, { message: 'Event not found' });
+  await assertCommitteeOpen(event.committeeNumber);
+  if (event.financesLocked) {
+    throw new HTTPException(403, { message: 'Finances are locked for this event' });
+  }
+
+  const updatedHistory: any = claim.auditHistory || [];
+  updatedHistory.push({
+    action: 'deleted',
+    actorId,
+    timestamp: new Date().toISOString(),
+    previousStatus: claim.status,
+    newStatus: 'deleted',
+  });
+
+  const [updated] = await db
+    .update(expenseClaims)
+    .set({
+      status: 'deleted',
+      auditHistory: updatedHistory,
+    })
+    .where(eq(expenseClaims.id, claimId))
+    .returning();
 
   return updated;
 };
@@ -1690,10 +1884,11 @@ export const getEventClaims = async (eventId: number) => {
       paidBy: expenseClaims.paidBy,
       paidAt: expenseClaims.paidAt,
       paymentProof: expenseClaims.paymentProof,
+      auditHistory: expenseClaims.auditHistory,
     })
     .from(expenseClaims)
     .leftJoin(claimerAlias, eq(expenseClaims.userId, claimerAlias.id))
-    .where(eq(expenseClaims.eventId, eventId))
+    .where(and(eq(expenseClaims.eventId, eventId), ne(expenseClaims.status, 'deleted')))
     .orderBy(desc(expenseClaims.submittedAt));
 };
 
@@ -1711,10 +1906,11 @@ export const getMyClaims = async (userId: string) => {
       notes: expenseClaims.notes,
       paidAt: expenseClaims.paidAt,
       paymentProof: expenseClaims.paymentProof,
+      auditHistory: expenseClaims.auditHistory,
     })
     .from(expenseClaims)
     .innerJoin(events, eq(expenseClaims.eventId, events.id))
-    .where(eq(expenseClaims.userId, userId))
+    .where(and(eq(expenseClaims.userId, userId), ne(expenseClaims.status, 'deleted')))
     .orderBy(desc(expenseClaims.submittedAt));
 };
 

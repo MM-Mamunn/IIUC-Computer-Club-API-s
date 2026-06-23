@@ -1,6 +1,17 @@
 import type { Context } from 'hono';
-import { searchUsers, getUserById, getDashboardStats, getBudgetStats } from './user.service';
+import { searchUsers, getUserDirectory, getUserById, getDashboardStats, getBudgetStats } from './user.service';
 import { HTTPException } from 'hono/http-exception';
+
+export const directory = async (c: Context) => {
+  const page = parseInt(c.req.query('page') || '1', 10);
+  const limit = parseInt(c.req.query('limit') || '10', 10);
+  const search = c.req.query('search') || undefined;
+  const department = c.req.query('department') || undefined;
+  const committee = c.req.query('committee') || undefined;
+
+  const result = await getUserDirectory({ page, limit, search, department, committee });
+  return c.json(result, 200);
+};
 
 export const search = async (c: Context) => {
   const query = c.req.query('q') || '';

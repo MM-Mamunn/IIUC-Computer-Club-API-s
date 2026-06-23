@@ -62,6 +62,10 @@ export const users = pgTable('users', {
 
   profileImage: text('profile_image'),
 
+  idCard: text('id_card'),
+
+  department: varchar('department', { length: 100 }),
+
   /** When true, user must change password before accessing dashboard */
   mustChangePassword: boolean('must_change_password').notNull().default(false),
 
