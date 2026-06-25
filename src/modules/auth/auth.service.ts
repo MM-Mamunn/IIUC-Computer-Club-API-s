@@ -218,6 +218,10 @@ export const showMe = async (c: Context) => {
       idCard: users.idCard,
       department: users.department,
       description: users.description,
+      githubUrl: users.githubUrl,
+      linkedinUrl: users.linkedinUrl,
+      facebookUrl: users.facebookUrl,
+      twitterUrl: users.twitterUrl,
       createdat: users.createdAt,
     })
     .from(users)
@@ -236,6 +240,10 @@ type UpdateUserInput = {
   gender?: string;
   profileImage?: string;
   description?: string;
+  githubUrl?: string | null;
+  linkedinUrl?: string | null;
+  facebookUrl?: string | null;
+  twitterUrl?: string | null;
 };
 
 export const updateUser = async (data: UpdateUserInput, c: Context) => {
@@ -265,6 +273,10 @@ export const updateUser = async (data: UpdateUserInput, c: Context) => {
       email: users.email,
       description: users.description,
       profileImage: users.profileImage,
+      githubUrl: users.githubUrl,
+      linkedinUrl: users.linkedinUrl,
+      facebookUrl: users.facebookUrl,
+      twitterUrl: users.twitterUrl,
       createdAt: users.createdAt,
     });
   if (!updatedUser) {

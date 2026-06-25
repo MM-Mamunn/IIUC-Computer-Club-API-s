@@ -66,6 +66,11 @@ export const users = pgTable('users', {
 
   department: varchar('department', { length: 100 }),
 
+  githubUrl: text('github_url'),
+  linkedinUrl: text('linkedin_url'),
+  facebookUrl: text('facebook_url'),
+  twitterUrl: text('twitter_url'),
+
   /** When true, user must change password before accessing dashboard */
   mustChangePassword: boolean('must_change_password').notNull().default(false),
 

@@ -131,9 +131,9 @@ export const list = async (c: Context) => {
 };
 
 export const getOne = async (c: Context) => {
-  const id = parseInt(c.req.param('id'));
-  if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
-  const event = await getEventById(id);
+  const idParam = c.req.param('id');
+  // Accept either a slug string or a numeric id (backward compat)
+  const event = await getEventById(idParam);
   return c.json({ event }, 200);
 };
 

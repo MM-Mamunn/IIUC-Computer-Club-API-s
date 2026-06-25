@@ -22,6 +22,12 @@ export const events = pgTable('events', {
 
   title: varchar('title', { length: 500 }).notNull(),
 
+  /**
+   * SEO-friendly URL slug derived from the title, e.g. "programming-contest-2026-50".
+   * Always unique. Auto-generated on create; regenerated when title changes.
+   */
+  slug: varchar('slug', { length: 600 }).unique(),
+
   description: text('description'),
 
   /** Which committee is hosting this event */

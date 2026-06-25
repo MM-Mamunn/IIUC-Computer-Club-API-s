@@ -32,6 +32,25 @@ function invalidateEventCaches() {
   invalidate('president:');
 }
 
+// ─── Slug Generation ───
+/**
+ * Converts an event title + id into a URL-safe slug.
+ * e.g. "Programming Contest 2026!" + id 50 → "programming-contest-2026-50"
+ * The id suffix guarantees global uniqueness.
+ */
+export function generateEventSlug(title: string, id: number): string {
+  const base = title
+    .toLowerCase()
+    .normalize('NFD')                    // decompose accents
+    .replace(/[\u0300-\u036f]/g, '')     // strip diacritics
+    .replace(/[^a-z0-9\s-]/g, '')        // keep alphanumeric, spaces, hyphens
+    .trim()
+    .replace(/\s+/g, '-')               // spaces → hyphens
+    .replace(/-+/g, '-')                // collapse multiple hyphens
+    .slice(0, 120);                      // cap base at 120 chars
+  return `${base}-${id}`;
+}
+
 // ─── Create Event ───
 export const createEvent = async (
   data: {
@@ -122,6 +141,17 @@ export const createEvent = async (
       .returning();
   });
 
+  // Generate slug now that we have the event id
+  if (event) {
+    const slug = generateEventSlug(event.title, event.id);
+    const [withSlug] = await db
+      .update(events)
+      .set({ slug })
+      .where(eq(events.id, event.id))
+      .returning();
+    return withSlug ?? event;
+  }
+
   return event;
 };
 
@@ -188,6 +218,7 @@ export const listEvents = (committeeNumber?: string, status?: string, gender?: s
           genderRestriction: events.genderRestriction,
           useExternalForm: events.useExternalForm,
           externalFormUrl: events.externalFormUrl,
+          slug: events.slug,
           createdAt: events.createdAt,
           registrationCount:
             sql<number>`(select count(*)::int from event_registrations er join events e on er.event_id = e.id where er.event_id = ${events.id} and er.payment_status != 'failed' and not (e.use_external_form = true and (e.is_paid = true or e.is_donation = true) and er.payment_status = 'external'))`.as(
@@ -235,6 +266,7 @@ export const listEvents = (committeeNumber?: string, status?: string, gender?: s
         genderRestriction: events.genderRestriction,
         useExternalForm: events.useExternalForm,
         externalFormUrl: events.externalFormUrl,
+        slug: events.slug,
         createdAt: events.createdAt,
         registrationCount:
           sql<number>`(select count(*)::int from event_registrations er join events e on er.event_id = e.id where er.event_id = ${events.id} and er.payment_status != 'failed' and not (e.use_external_form = true and (e.is_paid = true or e.is_donation = true) and er.payment_status = 'external'))`.as(
@@ -258,8 +290,17 @@ export const listEvents = (committeeNumber?: string, status?: string, gender?: s
 };
 
 // ─── Get Single Event with registration count ───
-export const getEventById = async (id: number) => {
-  const [event] = await db.select().from(events).where(eq(events.id, id));
+// Accepts either a numeric id or a slug string
+export const getEventById = async (idOrSlug: number | string) => {
+  let event;
+  if (typeof idOrSlug === 'number' || /^\d+$/.test(String(idOrSlug))) {
+    // Numeric id
+    const numId = typeof idOrSlug === 'number' ? idOrSlug : parseInt(idOrSlug, 10);
+    [event] = await db.select().from(events).where(eq(events.id, numId));
+  } else {
+    // Slug lookup
+    [event] = await db.select().from(events).where(eq(events.slug, String(idOrSlug)));
+  }
   if (!event) throw new HTTPException(404, { message: 'Event not found' });
 
   // For paid Google Form events, 'external' status = user opened form link but hasn't
@@ -271,7 +312,7 @@ export const getEventById = async (id: number) => {
     .from(eventRegistrations)
     .where(
       and(
-        eq(eventRegistrations.eventId, id),
+        eq(eventRegistrations.eventId, event.id),
         ne(eventRegistrations.paymentStatus, 'failed'),
         isPaidExternalForm
           ? ne(eventRegistrations.paymentStatus, 'external')
@@ -313,6 +354,12 @@ export const updateEvent = async (id: number, data: Record<string, unknown>) => 
     'externalFormUrl',
   ]);
 
+  // If title is being updated, regenerate slug
+  const titleChanged = data.title !== undefined && data.title !== existing.title;
+  if (titleChanged) {
+    // We regenerate slug after update so we have the id already
+  }
+
   const updateData: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(data)) {
     if (v !== undefined && allowed.has(k)) {
@@ -352,6 +399,11 @@ export const updateEvent = async (id: number, data: Record<string, unknown>) => 
         .update(events)
         .set({ isFeatured: false })
         .where(and(eq(events.isFeatured, true), ne(events.id, id)));
+    }
+
+    // Regenerate slug if title is changing
+    if (titleChanged && typeof updateData.title === 'string') {
+      updateData.slug = generateEventSlug(updateData.title, id);
     }
 
     return tx.update(events).set(updateData).where(eq(events.id, id)).returning();

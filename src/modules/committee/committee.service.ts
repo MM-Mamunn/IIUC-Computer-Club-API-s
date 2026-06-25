@@ -215,6 +215,11 @@ export const showMembers = async (number: string) => {
         profileImage: users.profileImage,
         role: executives.role,
         position: executives.position,
+        bio: users.description,
+        githubUrl: users.githubUrl,
+        linkedinUrl: users.linkedinUrl,
+        facebookUrl: users.facebookUrl,
+        twitterUrl: users.twitterUrl,
       })
       .from(executives)
       .innerJoin(users, eq(executives.id, users.id))
