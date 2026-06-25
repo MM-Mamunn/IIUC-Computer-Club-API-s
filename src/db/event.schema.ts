@@ -112,6 +112,12 @@ export const events = pgTable('events', {
   /** When the finances were locked */
   financesLockedAt: timestamp('finances_locked_at', { withTimezone: true }),
 
+  /** Whether the event uses an external registration form (e.g. Google Form) */
+  useExternalForm: boolean('use_external_form').notNull().default(false),
+
+  /** The URL of the external registration form */
+  externalFormUrl: text('external_form_url'),
+
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 

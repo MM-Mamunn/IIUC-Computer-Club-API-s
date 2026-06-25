@@ -481,6 +481,12 @@ export async function sendPaymentRejectionEmail(
       'We could not verify your payment. It appears the transaction ID submitted is invalid or no payment was received. Please make a fresh payment of the full amount and submit the correct transaction ID.';
     instructionText = 'Click the button below to complete the full payment and submit your details.';
     buttonLabel = 'Submit Full Payment';
+  } else if (rejectionType === 'form_not_submitted') {
+    reasonTitle = 'Issue: Google Form Submission Not Found';
+    reasonMessage =
+      'We could not verify your registration because we did not find a matching response in our Google Form records. Please make sure you have filled out the Google Form and resubmit your details.';
+    instructionText = 'Click the button below to review your details and access the Google Form.';
+    buttonLabel = 'Complete Registration Form';
   }
 
   const html = `

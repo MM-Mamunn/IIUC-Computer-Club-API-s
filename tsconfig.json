@@ -41,7 +41,6 @@
     "moduleResolution": "node",
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "ignoreDeprecations": "6.0",
-    "strict": true,
+    "strict": true
   },
 }

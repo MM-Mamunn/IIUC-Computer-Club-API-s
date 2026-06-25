@@ -74,6 +74,8 @@ export const create = async (c: Context) => {
       maxParticipants: parsedMaxParticipants,
       sslcommerzEnabled: formData.get('sslcommerzEnabled') === 'true',
       isFeatured: formData.get('isFeatured') === 'true',
+      useExternalForm: formData.get('useExternalForm') === 'true',
+      externalFormUrl: (formData.get('externalFormUrl') as string) || undefined,
       estimatedBudget: formData.get('estimatedBudget')
         ? Number(formData.get('estimatedBudget'))
         : 0,
@@ -163,12 +165,17 @@ export const update = async (c: Context) => {
         }
         continue;
       }
-      if (key === 'isPaid' || key === 'sslcommerzEnabled' || key === 'isDonation') {
+      if (key === 'isPaid' || key === 'sslcommerzEnabled' || key === 'isDonation' || key === 'useExternalForm') {
         data[key] = value === 'true';
         continue;
       }
       if (key === 'isFeatured') {
         data[key] = value === 'true';
+        continue;
+      }
+      if (key === 'externalFormUrl') {
+        const valStr = String(value).trim();
+        data[key] = valStr ? valStr : null;
         continue;
       }
       if (

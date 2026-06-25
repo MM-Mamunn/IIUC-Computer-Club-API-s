@@ -53,6 +53,8 @@ export const createEvent = async (
     allocatedBudget?: number;
     genderRestriction?: string;
     isFeatured?: boolean;
+    useExternalForm?: boolean;
+    externalFormUrl?: string;
   },
   c: Context,
 ) => {
@@ -80,6 +82,15 @@ export const createEvent = async (
       await tx.update(events).set({ isFeatured: false }).where(eq(events.isFeatured, true));
     }
 
+    const useExternalForm = data.useExternalForm ?? false;
+    const externalFormUrl = useExternalForm ? (data.externalFormUrl ?? null) : null;
+    const isPaid = data.isPaid ?? false;
+    const isDonation = data.isDonation ?? false;
+    const fee = data.fee ?? 0;
+    const sslcommerzEnabled = data.sslcommerzEnabled ?? false;
+    const paymentNumbers = data.paymentNumbers ?? null;
+    const customFields = useExternalForm ? null : (data.customFields ?? null);
+
     return tx
       .insert(events)
       .values({
@@ -91,20 +102,22 @@ export const createEvent = async (
           ? new Date(data.registrationDeadline)
           : null,
         venue: data.venue ?? null,
-        isPaid: data.isPaid ?? false,
-        isDonation: data.isDonation ?? false,
-        fee: data.fee ?? 0,
+        isPaid,
+        isDonation,
+        fee,
         maxParticipants: data.maxParticipants ?? null,
         bannerImage: data.bannerImage ?? null,
         status: 'upcoming',
-        paymentNumbers: data.paymentNumbers ?? null,
-        sslcommerzEnabled: data.sslcommerzEnabled ?? false,
-        customFields: data.customFields ?? null,
+        paymentNumbers,
+        sslcommerzEnabled,
+        customFields,
         createdBy: user.id,
         estimatedBudget: data.estimatedBudget ?? 0,
         allocatedBudget: data.allocatedBudget ?? 0,
         genderRestriction,
         isFeatured: data.isFeatured ?? false,
+        useExternalForm,
+        externalFormUrl,
       })
       .returning();
   });
@@ -173,9 +186,11 @@ export const listEvents = (committeeNumber?: string, status?: string, gender?: s
           createdBy: events.createdBy,
           estimatedBudget: events.estimatedBudget,
           genderRestriction: events.genderRestriction,
+          useExternalForm: events.useExternalForm,
+          externalFormUrl: events.externalFormUrl,
           createdAt: events.createdAt,
           registrationCount:
-            sql<number>`(select count(*)::int from event_registrations er where er.event_id = ${events.id} and er.payment_status != 'failed')`.as(
+            sql<number>`(select count(*)::int from event_registrations er join events e on er.event_id = e.id where er.event_id = ${events.id} and er.payment_status != 'failed' and not (e.use_external_form = true and (e.is_paid = true or e.is_donation = true) and er.payment_status = 'external'))`.as(
               'registrationCount',
             ),
         })
@@ -218,9 +233,11 @@ export const listEvents = (committeeNumber?: string, status?: string, gender?: s
         financesLockedBy: events.financesLockedBy,
         financesLockedAt: events.financesLockedAt,
         genderRestriction: events.genderRestriction,
+        useExternalForm: events.useExternalForm,
+        externalFormUrl: events.externalFormUrl,
         createdAt: events.createdAt,
         registrationCount:
-          sql<number>`(select count(*)::int from event_registrations er where er.event_id = ${events.id} and er.payment_status != 'failed')`.as(
+          sql<number>`(select count(*)::int from event_registrations er join events e on er.event_id = e.id where er.event_id = ${events.id} and er.payment_status != 'failed' and not (e.use_external_form = true and (e.is_paid = true or e.is_donation = true) and er.payment_status = 'external'))`.as(
             'registrationCount',
           ),
       })
@@ -245,13 +262,20 @@ export const getEventById = async (id: number) => {
   const [event] = await db.select().from(events).where(eq(events.id, id));
   if (!event) throw new HTTPException(404, { message: 'Event not found' });
 
+  // For paid Google Form events, 'external' status = user opened form link but hasn't
+  // paid on our website yet. Exclude these from confirmed registration counts.
+  const isPaidExternalForm = event.useExternalForm && (event.isPaid || event.isDonation);
+
   const [regCount] = await db
     .select({ count: count() })
     .from(eventRegistrations)
     .where(
       and(
         eq(eventRegistrations.eventId, id),
-        ne(eventRegistrations.paymentStatus, 'failed')
+        ne(eventRegistrations.paymentStatus, 'failed'),
+        isPaidExternalForm
+          ? ne(eventRegistrations.paymentStatus, 'external')
+          : undefined
       )
     );
 
@@ -285,6 +309,8 @@ export const updateEvent = async (id: number, data: Record<string, unknown>) => 
     'genderRestriction',
     'committeeNumber',
     'isFeatured',
+    'useExternalForm',
+    'externalFormUrl',
   ]);
 
   const updateData: Record<string, unknown> = {};
@@ -296,6 +322,12 @@ export const updateEvent = async (id: number, data: Record<string, unknown>) => 
         updateData[k] = v;
       }
     }
+  }
+
+  if (updateData.useExternalForm === true) {
+    updateData.customFields = null;
+  } else if (updateData.useExternalForm === false) {
+    updateData.externalFormUrl = null;
   }
 
   if (Object.prototype.hasOwnProperty.call(updateData, 'maxParticipants')) {
@@ -385,14 +417,20 @@ export const registerForEvent = async (
   }
 
   // Check max participants
+  // For paid Google Form events, 'external' registrations are unconfirmed (not yet paid
+  // on the website), so they don't count toward seat limits.
   if (event.maxParticipants) {
+    const isPaidExternalForm = event.useExternalForm && (event.isPaid || event.isDonation);
     const [regCount] = await db
       .select({ count: count() })
       .from(eventRegistrations)
       .where(
         and(
           eq(eventRegistrations.eventId, eventId),
-          ne(eventRegistrations.paymentStatus, 'failed')
+          ne(eventRegistrations.paymentStatus, 'failed'),
+          isPaidExternalForm
+            ? ne(eventRegistrations.paymentStatus, 'external')
+            : undefined
         )
       );
     if ((regCount?.count ?? 0) >= event.maxParticipants) {
@@ -414,20 +452,24 @@ export const registerForEvent = async (
 
   // For paid events with manual payment, require transaction ID
   // For donation events, require a donation amount > 0
-  if (event.isDonation) {
-    if (!donationAmount || donationAmount <= 0) {
-      throw new HTTPException(400, { message: 'Please enter a donation amount' });
-    }
-    if (paymentMethod && paymentMethod !== 'sslcommerz' && !transactionId) {
+  if (!event.useExternalForm) {
+    if (event.isDonation) {
+      if (!donationAmount || donationAmount <= 0) {
+        throw new HTTPException(400, { message: 'Please enter a donation amount' });
+      }
+      if (paymentMethod && paymentMethod !== 'sslcommerz' && !transactionId) {
+        throw new HTTPException(400, { message: 'Transaction ID is required for manual payment' });
+      }
+    } else if (event.isPaid && paymentMethod && paymentMethod !== 'sslcommerz' && !transactionId) {
+      // For regular paid events, require transaction ID for manual payment
       throw new HTTPException(400, { message: 'Transaction ID is required for manual payment' });
     }
-  } else if (event.isPaid && paymentMethod && paymentMethod !== 'sslcommerz' && !transactionId) {
-    // For regular paid events, require transaction ID for manual payment
-    throw new HTTPException(400, { message: 'Transaction ID is required for manual payment' });
   }
 
   let paymentStatus = 'free';
-  if (event.isPaid || event.isDonation) {
+  if (event.useExternalForm) {
+    paymentStatus = 'external';
+  } else if (event.isPaid || event.isDonation) {
     paymentStatus =
       paymentMethod === 'sslcommerz' ? 'pending' : transactionId ? 'pending' : 'pending';
   }
@@ -479,7 +521,7 @@ export const registerForEvent = async (
     .select({ name: users.name, email: users.email })
     .from(users)
     .where(eq(users.id, userId));
-  if (regUser) {
+  if (regUser && !event.useExternalForm) {
     await sendEventRegistrationEmail(
       regUser.email,
       regUser.name,
@@ -537,14 +579,20 @@ export const guestRegisterForEvent = async (
   }
 
   // Check max participants
+  // For paid Google Form events, 'external' registrations are unconfirmed (not yet paid
+  // on the website), so they don't count toward seat limits.
   if (event.maxParticipants) {
+    const isPaidExternalForm = event.useExternalForm && (event.isPaid || event.isDonation);
     const [regCount] = await db
       .select({ count: count() })
       .from(eventRegistrations)
       .where(
         and(
           eq(eventRegistrations.eventId, eventId),
-          ne(eventRegistrations.paymentStatus, 'failed')
+          ne(eventRegistrations.paymentStatus, 'failed'),
+          isPaidExternalForm
+            ? ne(eventRegistrations.paymentStatus, 'external')
+            : undefined
         )
       );
     if ((regCount?.count ?? 0) >= event.maxParticipants) {
@@ -606,26 +654,30 @@ export const guestRegisterForEvent = async (
 
   // Determine payment status
   let paymentStatus = 'free';
-  if (event.isPaid || event.isDonation) {
+  if (event.useExternalForm) {
+    paymentStatus = 'external';
+  } else if (event.isPaid || event.isDonation) {
     paymentStatus = 'pending';
   }
 
   // For donation events, require donation amount
-  if (event.isDonation) {
-    if (!data.donationAmount || data.donationAmount <= 0) {
-      throw new HTTPException(400, { message: 'Please enter a donation amount' });
-    }
-    if (data.paymentMethod && data.paymentMethod !== 'sslcommerz' && !data.transactionId) {
+  if (!event.useExternalForm) {
+    if (event.isDonation) {
+      if (!data.donationAmount || data.donationAmount <= 0) {
+        throw new HTTPException(400, { message: 'Please enter a donation amount' });
+      }
+      if (data.paymentMethod && data.paymentMethod !== 'sslcommerz' && !data.transactionId) {
+        throw new HTTPException(400, { message: 'Transaction ID is required for manual payment' });
+      }
+    } else if (
+      event.isPaid &&
+      data.paymentMethod &&
+      data.paymentMethod !== 'sslcommerz' &&
+      !data.transactionId
+    ) {
+      // For paid events with manual payment, require transaction ID
       throw new HTTPException(400, { message: 'Transaction ID is required for manual payment' });
     }
-  } else if (
-    event.isPaid &&
-    data.paymentMethod &&
-    data.paymentMethod !== 'sslcommerz' &&
-    !data.transactionId
-  ) {
-    // For paid events with manual payment, require transaction ID
-    throw new HTTPException(400, { message: 'Transaction ID is required for manual payment' });
   }
 
   const [reg] = await db
@@ -634,10 +686,10 @@ export const guestRegisterForEvent = async (
       eventId,
       userId: studentId,
       paymentStatus,
-      paymentMethod: event.isPaid || event.isDonation ? (data.paymentMethod ?? null) : null,
-      transactionId: data.transactionId ?? null,
-      donationAmount: event.isDonation ? (data.donationAmount ?? null) : null,
-      customFieldResponses: data.customFieldResponses ?? null,
+      paymentMethod: !event.useExternalForm && (event.isPaid || event.isDonation) ? (data.paymentMethod ?? null) : null,
+      transactionId: event.useExternalForm ? null : (data.transactionId ?? null),
+      donationAmount: !event.useExternalForm && event.isDonation ? (data.donationAmount ?? null) : null,
+      customFieldResponses: event.useExternalForm ? null : (data.customFieldResponses ?? null),
     })
     .returning();
 
@@ -654,16 +706,18 @@ export const guestRegisterForEvent = async (
   });
 
   // Send event registration confirmation email (async, don't block response)
-  await sendEventRegistrationEmail(
-    email,
-    data.name.trim(),
-    event.title,
-    event.eventDate.toISOString(),
-    event.venue,
-    event.isPaid,
-    event.fee ?? 0,
-    event.isDonation,
-  );
+  if (!event.useExternalForm) {
+    await sendEventRegistrationEmail(
+      email,
+      data.name.trim(),
+      event.title,
+      event.eventDate.toISOString(),
+      event.venue,
+      event.isPaid,
+      event.fee ?? 0,
+      event.isDonation,
+    );
+  }
 
   return { registration: reg, event, token };
 };
@@ -940,7 +994,7 @@ export const verifyPayment = async (
       throw new HTTPException(400, { message: 'Please provide a reason for rejection' });
     }
 
-    const validTypes = ['incorrect_trxid', 'incorrect_amount', 'payment_not_found', 'other'];
+    const validTypes = ['incorrect_trxid', 'incorrect_amount', 'payment_not_found', 'form_not_submitted', 'other'];
     const type = validTypes.includes(rejectionType ?? '') ? rejectionType! : 'other';
 
     const [event] = await db.select().from(events).where(eq(events.id, eventId));
