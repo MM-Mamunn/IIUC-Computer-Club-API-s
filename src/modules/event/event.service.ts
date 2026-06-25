@@ -175,7 +175,7 @@ export const listEvents = (committeeNumber?: string, status?: string, gender?: s
           genderRestriction: events.genderRestriction,
           createdAt: events.createdAt,
           registrationCount:
-            sql<number>`(select count(*)::int from event_registrations er where er.event_id = ${events.id} and (case when ${events.isPaid} = false and ${events.isDonation} = false then true else er.payment_status = 'verified' end))`.as(
+            sql<number>`(select count(*)::int from event_registrations er where er.event_id = ${events.id} and er.payment_status != 'failed')`.as(
               'registrationCount',
             ),
         })
@@ -220,7 +220,7 @@ export const listEvents = (committeeNumber?: string, status?: string, gender?: s
         genderRestriction: events.genderRestriction,
         createdAt: events.createdAt,
         registrationCount:
-          sql<number>`(select count(*)::int from event_registrations er where er.event_id = ${events.id} and (case when ${events.isPaid} = false and ${events.isDonation} = false then true else er.payment_status = 'verified' end))`.as(
+          sql<number>`(select count(*)::int from event_registrations er where er.event_id = ${events.id} and er.payment_status != 'failed')`.as(
             'registrationCount',
           ),
       })
@@ -249,9 +249,10 @@ export const getEventById = async (id: number) => {
     .select({ count: count() })
     .from(eventRegistrations)
     .where(
-      event.isPaid || event.isDonation
-        ? and(eq(eventRegistrations.eventId, id), eq(eventRegistrations.paymentStatus, 'verified'))
-        : eq(eventRegistrations.eventId, id),
+      and(
+        eq(eventRegistrations.eventId, id),
+        ne(eventRegistrations.paymentStatus, 'failed')
+      )
     );
 
   return { ...event, registrationCount: regCount?.count ?? 0 };
@@ -388,7 +389,12 @@ export const registerForEvent = async (
     const [regCount] = await db
       .select({ count: count() })
       .from(eventRegistrations)
-      .where(eq(eventRegistrations.eventId, eventId));
+      .where(
+        and(
+          eq(eventRegistrations.eventId, eventId),
+          ne(eventRegistrations.paymentStatus, 'failed')
+        )
+      );
     if ((regCount?.count ?? 0) >= event.maxParticipants) {
       throw new HTTPException(400, { message: 'This event has reached maximum participants' });
     }
@@ -535,7 +541,12 @@ export const guestRegisterForEvent = async (
     const [regCount] = await db
       .select({ count: count() })
       .from(eventRegistrations)
-      .where(eq(eventRegistrations.eventId, eventId));
+      .where(
+        and(
+          eq(eventRegistrations.eventId, eventId),
+          ne(eventRegistrations.paymentStatus, 'failed')
+        )
+      );
     if ((regCount?.count ?? 0) >= event.maxParticipants) {
       throw new HTTPException(400, { message: 'This event has reached maximum participants' });
     }
@@ -1004,6 +1015,8 @@ export const verifyPayment = async (
         amountDeficit,
       );
     }
+
+    invalidateEventCaches();
 
     return updated;
   }

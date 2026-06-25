@@ -4,6 +4,7 @@ import { users } from '../../db/schema';
 import { eq, and } from 'drizzle-orm';
 import { HTTPException } from 'hono/http-exception';
 import { setSslcommerzTranId, verifySslcommerzPayment } from './event.service';
+import { invalidate } from '../../utils/cache';
 import crypto from 'crypto';
 
 const SSLCOMMERZ_STORE_ID = process.env.SSLCOMMERZ_STORE_ID ?? '';
@@ -142,6 +143,10 @@ export const handleSslcommerzIpn = async (body: Record<string, string>) => {
             eq(eventRegistrations.userId, reg.userId),
           ),
         );
+      
+      invalidate('events:');
+      invalidate('dashboard:');
+      invalidate('president:');
     }
     return { success: false };
   }
