@@ -940,7 +940,7 @@ export const verifyPayment = async (
       throw new HTTPException(400, { message: 'Please provide a reason for rejection' });
     }
 
-    const validTypes = ['incorrect_trxid', 'incorrect_amount', 'other'];
+    const validTypes = ['incorrect_trxid', 'incorrect_amount', 'payment_not_found', 'other'];
     const type = validTypes.includes(rejectionType ?? '') ? rejectionType! : 'other';
 
     const [event] = await db.select().from(events).where(eq(events.id, eventId));
@@ -993,13 +993,11 @@ export const verifyPayment = async (
       .where(and(eq(eventRegistrations.eventId, eventId), eq(eventRegistrations.userId, userId)))
       .returning();
 
-    // Send rejection email with fix-payment link
+    // Send rejection email with event details link
     const [user] = await db.select().from(users).where(eq(users.id, userId));
     if (user?.email && event) {
-      // Generate a JWT token for the fix-payment flow (valid for 7 days)
-      const fixToken = generateToken({ id: userId, eventId, purpose: 'fix-payment' }, '7d');
       const baseUrl = frontendBaseUrl || process.env.FRONTEND_URL || 'http://localhost:3000';
-      const fixPaymentLink = `${baseUrl}/events/${eventId}/fix-payment?token=${fixToken}`;
+      const fixPaymentLink = `${baseUrl}/events/${eventId}`;
 
       await sendPaymentRejectionEmail(
         user.email,

@@ -263,6 +263,7 @@ export async function sendEventRegistrationEmail(
   isDonation?: boolean,
 ) {
   const dateStr = formatBangladeshDateTime(eventDate);
+  const isPending = isPaid || isDonation;
 
   const paymentLine = isDonation
     ? '<p style="margin: 4px 0; color: #555;">🤝 <strong>Donation Event</strong></p>'
@@ -270,22 +271,34 @@ export async function sendEventRegistrationEmail(
       ? `<p style="margin: 4px 0; color: #555;">💰 <strong>Fee:</strong> ৳${fee}</p>`
       : '<p style="margin: 4px 0; color: #555;">🆓 <strong>Free Event</strong></p>';
 
-  const pendingNote =
-    isPaid || isDonation
-      ? '<p style="color: #f57c00;">Your payment is pending verification. You will be notified once it is confirmed.</p>'
-      : '';
+  const emailSubject = isPending
+    ? `Registration Request Received — ${eventTitle}`
+    : `Registration Confirmed — ${eventTitle}`;
+
+  const bannerBg = isPending ? '#fffbeb' : '#f0f9f0';
+  const bannerBorder = isPending ? '#fde68a' : '#c8e6c9';
+  const headingColor = isPending ? '#b45309' : '#2e7d32';
+  const headingText = isPending ? 'Registration Received! 📝' : 'Registration Confirmed! ✅';
+
+  const bodyText = isPending
+    ? `Hi <strong>${name}</strong>, we have received your registration request and payment details for the following event:`
+    : `Hi <strong>${name}</strong>, you have successfully registered for the following event:`;
+
+  const pendingNote = isPending
+    ? '<p style="color: #b45309; font-weight: bold; margin-top: 16px;">Your registration and payment information are currently pending verification. We will verify the details and notify you once your registration is fully confirmed.</p>'
+    : '';
 
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
       <div style="text-align: center; margin-bottom: 24px;">
         <h1 style="color: #1a1a1a; margin: 0;">IIUC Computer Club</h1>
       </div>
-      <div style="background: #f0f9f0; border-radius: 8px; padding: 24px; margin-bottom: 16px;">
-        <h2 style="color: #2e7d32; margin-top: 0;">Registration Confirmed! ✅</h2>
+      <div style="background: ${bannerBg}; border-radius: 8px; padding: 24px; margin-bottom: 16px;">
+        <h2 style="color: ${headingColor}; margin-top: 0;">${headingText}</h2>
         <p style="color: #555; line-height: 1.6;">
-          Hi <strong>${name}</strong>, you have successfully registered for the following event:
+          ${bodyText}
         </p>
-        <div style="background: #fff; border: 1px solid #c8e6c9; border-radius: 6px; padding: 16px; margin: 16px 0;">
+        <div style="background: #fff; border: 1px solid ${bannerBorder}; border-radius: 6px; padding: 16px; margin: 16px 0;">
           <h3 style="margin-top: 0; color: #1a1a1a;">${eventTitle}</h3>
           <p style="margin: 4px 0; color: #555;">📅 <strong>Date:</strong> ${dateStr}</p>
           ${venue ? `<p style="margin: 4px 0; color: #555;">📍 <strong>Venue:</strong> ${venue}</p>` : ''}
@@ -303,7 +316,7 @@ export async function sendEventRegistrationEmail(
     await enqueueMail({
       from: FROM,
       to,
-      subject: `Registration Confirmed — ${eventTitle}`,
+      subject: emailSubject,
       html,
     });
   } catch (err) {
@@ -433,11 +446,11 @@ export async function sendPaymentRejectionEmail(
     : `<p style="margin: 4px 0; color: #555;">💰 <strong>Amount Required:</strong> ৳${fee}</p>`;
 
   // Type-specific content
-  let reasonTitle = 'Reason for Rejection:';
+  let reasonTitle = 'Issue Details:';
   let reasonMessage = rejectionReason;
   let instructionText =
-    'Please submit a new payment using the button below. Make sure to use the correct amount and payment method.';
-  let buttonLabel = 'Fix Payment';
+    'Please click the button below to view and update your registration details.';
+  let buttonLabel = 'Update Registration';
   let extraInfo = '';
 
   if (rejectionType === 'incorrect_trxid') {
@@ -445,7 +458,7 @@ export async function sendPaymentRejectionEmail(
     reasonMessage =
       'Your transaction ID could not be verified or was entered incorrectly. Please submit the correct transaction ID.';
     instructionText =
-      'Click the button below to submit your correct Transaction ID. You do not need to make a new payment.';
+      'Click the button below to submit your correct Transaction ID.';
     buttonLabel = 'Update Transaction ID';
   } else if (rejectionType === 'incorrect_amount') {
     reasonTitle = 'Issue: Incorrect Payment Amount';
@@ -462,6 +475,12 @@ export async function sendPaymentRejectionEmail(
     }
     instructionText = 'Click the button below to submit the remaining payment.';
     buttonLabel = 'Pay Remaining Amount';
+  } else if (rejectionType === 'payment_not_found') {
+    reasonTitle = 'Issue: Payment Not Found (Invalid Transaction ID)';
+    reasonMessage =
+      'We could not verify your payment. It appears the transaction ID submitted is invalid or no payment was received. Please make a fresh payment of the full amount and submit the correct transaction ID.';
+    instructionText = 'Click the button below to complete the full payment and submit your details.';
+    buttonLabel = 'Submit Full Payment';
   }
 
   const html = `
@@ -469,19 +488,19 @@ export async function sendPaymentRejectionEmail(
       <div style="text-align: center; margin-bottom: 24px;">
         <h1 style="color: #1a1a1a; margin: 0;">IIUC Computer Club</h1>
       </div>
-      <div style="background: #fef2f2; border-radius: 8px; padding: 24px; margin-bottom: 16px;">
-        <h2 style="color: #dc2626; margin-top: 0;">Payment Rejected ❌</h2>
+      <div style="background: #fffbeb; border-radius: 8px; padding: 24px; margin-bottom: 16px;">
+        <h2 style="color: #b45309; margin-top: 0;">Registration Action Required ⚠️</h2>
         <p style="color: #555; line-height: 1.6;">
-          Hi <strong>${name}</strong>, your payment for the following event has been rejected:
+          Hi <strong>${name}</strong>, there is an issue with your registration for the following event:
         </p>
-        <div style="background: #fff; border: 1px solid #fecaca; border-radius: 6px; padding: 16px; margin: 16px 0;">
+        <div style="background: #fff; border: 1px solid #fde68a; border-radius: 6px; padding: 16px; margin: 16px 0;">
           <h3 style="margin-top: 0; color: #1a1a1a;">${eventTitle}</h3>
           <p style="margin: 4px 0; color: #555;">📅 <strong>Date:</strong> ${dateStr}</p>
           ${venue ? `<p style="margin: 4px 0; color: #555;">📍 <strong>Venue:</strong> ${venue}</p>` : ''}
           ${amountLine}
         </div>
-        <div style="background: #fff; border: 1px solid #fecaca; border-radius: 6px; padding: 16px; margin: 16px 0;">
-          <p style="margin: 0; color: #dc2626; font-weight: bold;">${reasonTitle}</p>
+        <div style="background: #fff; border: 1px solid #fde68a; border-radius: 6px; padding: 16px; margin: 16px 0;">
+          <p style="margin: 0; color: #b45309; font-weight: bold;">${reasonTitle}</p>
           <p style="margin: 8px 0 0; color: #555;">${reasonMessage}</p>
         </div>
         ${extraInfo}
@@ -508,10 +527,12 @@ export async function sendPaymentRejectionEmail(
 
   const subjectSuffix =
     rejectionType === 'incorrect_trxid'
-      ? 'Incorrect Transaction ID'
+      ? 'Action Required: Incorrect Transaction ID'
       : rejectionType === 'incorrect_amount'
-        ? 'Incorrect Payment Amount'
-        : 'Payment Rejected';
+        ? 'Action Required: Incorrect Payment Amount'
+        : rejectionType === 'payment_not_found'
+          ? 'Action Required: Payment Not Found'
+          : 'Action Required: Registration Update Needed';
 
   try {
     await enqueueMail({
