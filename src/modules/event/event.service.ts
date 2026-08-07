@@ -221,7 +221,7 @@ export const listEvents = (committeeNumber?: string, status?: string, gender?: s
           slug: events.slug,
           createdAt: events.createdAt,
           registrationCount:
-            sql<number>`(select count(*)::int from event_registrations er join events e on er.event_id = e.id where er.event_id = ${events.id} and er.payment_status != 'failed' and not (e.use_external_form = true and (e.is_paid = true or e.is_donation = true) and er.payment_status = 'external'))`.as(
+            sql<number>`(select count(*)::int from event_registrations er join events e on er.event_id = e.id where er.event_id = ${events.id} and er.payment_status != 'failed' and e.use_external_form = false)`.as(
               'registrationCount',
             ),
         })
@@ -269,7 +269,7 @@ export const listEvents = (committeeNumber?: string, status?: string, gender?: s
         slug: events.slug,
         createdAt: events.createdAt,
         registrationCount:
-          sql<number>`(select count(*)::int from event_registrations er join events e on er.event_id = e.id where er.event_id = ${events.id} and er.payment_status != 'failed' and not (e.use_external_form = true and (e.is_paid = true or e.is_donation = true) and er.payment_status = 'external'))`.as(
+          sql<number>`(select count(*)::int from event_registrations er join events e on er.event_id = e.id where er.event_id = ${events.id} and er.payment_status != 'failed' and e.use_external_form = false)`.as(
             'registrationCount',
           ),
       })
@@ -303,9 +303,9 @@ export const getEventById = async (idOrSlug: number | string) => {
   }
   if (!event) throw new HTTPException(404, { message: 'Event not found' });
 
-  // For paid Google Form events, 'external' status = user opened form link but hasn't
-  // paid on our website yet. Exclude these from confirmed registration counts.
-  const isPaidExternalForm = event.useExternalForm && (event.isPaid || event.isDonation);
+  if (event.useExternalForm) {
+    return { ...event, registrationCount: 0 };
+  }
 
   const [regCount] = await db
     .select({ count: count() })
@@ -313,10 +313,7 @@ export const getEventById = async (idOrSlug: number | string) => {
     .where(
       and(
         eq(eventRegistrations.eventId, event.id),
-        ne(eventRegistrations.paymentStatus, 'failed'),
-        isPaidExternalForm
-          ? ne(eventRegistrations.paymentStatus, 'external')
-          : undefined
+        ne(eventRegistrations.paymentStatus, 'failed')
       )
     );
 
@@ -470,19 +467,15 @@ export const registerForEvent = async (
 
   // Check max participants
   // For paid Google Form events, 'external' registrations are unconfirmed (not yet paid
-  // on the website), so they don't count toward seat limits.
-  if (event.maxParticipants) {
-    const isPaidExternalForm = event.useExternalForm && (event.isPaid || event.isDonation);
+  // Check max participants (for internal events)
+  if (event.maxParticipants && !event.useExternalForm) {
     const [regCount] = await db
       .select({ count: count() })
       .from(eventRegistrations)
       .where(
         and(
           eq(eventRegistrations.eventId, eventId),
-          ne(eventRegistrations.paymentStatus, 'failed'),
-          isPaidExternalForm
-            ? ne(eventRegistrations.paymentStatus, 'external')
-            : undefined
+          ne(eventRegistrations.paymentStatus, 'failed')
         )
       );
     if ((regCount?.count ?? 0) >= event.maxParticipants) {
@@ -630,21 +623,15 @@ export const guestRegisterForEvent = async (
     }
   }
 
-  // Check max participants
-  // For paid Google Form events, 'external' registrations are unconfirmed (not yet paid
-  // on the website), so they don't count toward seat limits.
-  if (event.maxParticipants) {
-    const isPaidExternalForm = event.useExternalForm && (event.isPaid || event.isDonation);
+  // Check max participants (for internal events)
+  if (event.maxParticipants && !event.useExternalForm) {
     const [regCount] = await db
       .select({ count: count() })
       .from(eventRegistrations)
       .where(
         and(
           eq(eventRegistrations.eventId, eventId),
-          ne(eventRegistrations.paymentStatus, 'failed'),
-          isPaidExternalForm
-            ? ne(eventRegistrations.paymentStatus, 'external')
-            : undefined
+          ne(eventRegistrations.paymentStatus, 'failed')
         )
       );
     if ((regCount?.count ?? 0) >= event.maxParticipants) {
