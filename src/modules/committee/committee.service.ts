@@ -14,6 +14,12 @@ export const addCommittee = async (
   description: string | null,
   userId: string,
 ) => {
+  if (userId === 'DMAU') {
+    throw new HTTPException(403, {
+      message: 'Only the current department chairman and president (MMU) can create a new committee session.',
+    });
+  }
+
   if (!number || !start || !session) {
     throw new HTTPException(400, {
       message: 'number, start, and session are required',
@@ -156,7 +162,7 @@ export const showAllCommittees = () =>
   });
 
 // ─── Close Committee ───
-export const closeCommittee = async (number: string, endDate: string) => {
+export const closeCommittee = async (number: string, endDate: string, userId?: string) => {
   const [existing] = await db.select().from(committee).where(eq(committee.number, number));
 
   if (!existing) {
@@ -165,6 +171,26 @@ export const closeCommittee = async (number: string, endDate: string) => {
 
   if (existing.end) {
     throw new HTTPException(400, { message: 'Committee is already closed' });
+  }
+
+  // Permissions: MMU can close any committee; others (including DMAU) can only close committees they created/presided over
+  if (userId !== 'MMU') {
+    const isPresidentOfTarget = await db
+      .select()
+      .from(executives)
+      .where(
+        and(
+          eq(executives.id, userId ?? ''),
+          eq(executives.number, number),
+          eq(executives.role, 'president'),
+        ),
+      );
+
+    if (isPresidentOfTarget.length === 0) {
+      throw new HTTPException(403, {
+        message: 'You can only close committees that you created / presided over.',
+      });
+    }
   }
 
   if (!endDate || isNaN(Date.parse(endDate))) {
@@ -177,17 +203,6 @@ export const closeCommittee = async (number: string, endDate: string) => {
     .set({ end: endDate })
     .where(eq(committee.number, number))
     .returning();
-
-  // Also close the sibling committee (male ↔ female)
-  const siblingNumber =
-    existing.gender === 'male' ? `${number}F` : number.endsWith('F') ? number.slice(0, -1) : null;
-
-  if (siblingNumber) {
-    const [sibling] = await db.select().from(committee).where(eq(committee.number, siblingNumber));
-    if (sibling && !sibling.end) {
-      await db.update(committee).set({ end: endDate }).where(eq(committee.number, siblingNumber));
-    }
-  }
 
   // Invalidate committee + dashboard caches
   invalidate('committee:');

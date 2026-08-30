@@ -99,6 +99,9 @@ export const loginUser = async (id: string, password: string) => {
       role = 'president';
       position = latestExecutive.position ?? '';
       committeeNumber = latestExecutive.number;
+    } else if (id === 'MMU') {
+      role = 'president';
+      position = 'president';
     }
   }
 
@@ -156,6 +159,9 @@ export const refreshToken = async (c: Context) => {
       role = 'president';
       position = latestExecutive.position ?? '';
       committeeNumber = latestExecutive.number;
+    } else if (user.id === 'MMU') {
+      role = 'president';
+      position = 'president';
     }
   }
 

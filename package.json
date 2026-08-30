@@ -31,6 +31,7 @@
     "db:push": "drizzle-kit push",
     "db:reset": "bun run src/scripts/reset-db.ts",
     "db:seed": "bun run src/scripts/seed.ts",
+    "db:seed-dmau": "bun run src/scripts/seed-dmau.ts",
     "db:seed-massive": "bun run src/scripts/seed-massive.ts",
     "start": "vercel dev",
     "deploy": "vercel",

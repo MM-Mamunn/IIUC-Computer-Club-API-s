@@ -52,7 +52,8 @@ export const allCommittees = async (c: Context) => {
 export const close = async (c: Context) => {
   const number = c.req.param('number');
   const { endDate } = await c.req.json();
-  const committee = await closeCommittee(number, endDate);
+  const user = c.get('user');
+  const committee = await closeCommittee(number, endDate, user?.id);
   return c.json({ committee }, 200);
 };
 

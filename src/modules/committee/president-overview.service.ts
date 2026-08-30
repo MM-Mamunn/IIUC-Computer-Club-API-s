@@ -12,8 +12,30 @@ import { HTTPException } from 'hono/http-exception';
 import { cached } from '../../utils/cache';
 
 // ─── Get all committees (cached 60s) ───
-export const getAllCommitteesForPresident = () =>
-  cached('committee:president:list', 60_000, async () => {
+export const getAllCommitteesForPresident = (userId?: string) =>
+  cached(`committee:president:list:${userId ?? 'all'}`, 60_000, async () => {
+    if (userId === 'DMAU') {
+      const presComms = await db
+        .select({ number: executives.number })
+        .from(executives)
+        .where(and(eq(executives.id, 'DMAU'), eq(executives.role, 'president')));
+      const validNumbers = presComms.map((c) => c.number);
+      if (validNumbers.length === 0) return [];
+
+      return db
+        .select({
+          number: committee.number,
+          gender: committee.gender,
+          start: committee.start,
+          end: committee.end,
+          beginningBudget: committee.beginningBudget,
+          description: committee.description,
+        })
+        .from(committee)
+        .where(inArray(committee.number, validNumbers))
+        .orderBy(asc(committee.end), desc(committee.start));
+    }
+
     return db
       .select({
         number: committee.number,
@@ -28,7 +50,25 @@ export const getAllCommitteesForPresident = () =>
   });
 
 // ─── Get full financial overview — parallel queries for <1s response ───
-export const getCommitteeOverview = async (committeeNumber: string) => {
+export const getCommitteeOverview = async (committeeNumber: string, userId?: string) => {
+  if (userId === 'DMAU') {
+    const isPres = await db
+      .select()
+      .from(executives)
+      .where(
+        and(
+          eq(executives.id, 'DMAU'),
+          eq(executives.number, committeeNumber),
+          eq(executives.role, 'president'),
+        ),
+      );
+    if (isPres.length === 0) {
+      throw new HTTPException(403, {
+        message: 'You can only view overviews for sessions where you were the president.',
+      });
+    }
+  }
+
   // Phase 1: committee + events in parallel
   const [[comm], committeeEvents] = await Promise.all([
     db.select().from(committee).where(eq(committee.number, committeeNumber)),
@@ -260,10 +300,10 @@ const getSessionBudget = async (comm: {
 };
 
 // ─── Get ALL committee overviews in a single call (cached 2min) ───
-export const getAllOverviews = () =>
-  cached('president:all-overviews', 120_000, async () => {
+export const getAllOverviews = (userId?: string) =>
+  cached(`president:all-overviews:${userId ?? 'all'}`, 120_000, async () => {
     // Get all committees
-    const allCommittees = await db
+    let allCommitteesQuery = db
       .select({
         number: committee.number,
         gender: committee.gender,
@@ -272,8 +312,19 @@ export const getAllOverviews = () =>
         beginningBudget: committee.beginningBudget,
         description: committee.description,
       })
-      .from(committee)
-      .orderBy(asc(committee.end), desc(committee.start));
+      .from(committee);
+
+    if (userId === 'DMAU') {
+      const presComms = await db
+        .select({ number: executives.number })
+        .from(executives)
+        .where(and(eq(executives.id, 'DMAU'), eq(executives.role, 'president')));
+      const validNumbers = presComms.map((c) => c.number);
+      if (validNumbers.length === 0) return [];
+      allCommitteesQuery = allCommitteesQuery.where(inArray(committee.number, validNumbers)) as any;
+    }
+
+    const allCommittees = await allCommitteesQuery.orderBy(asc(committee.end), desc(committee.start));
 
     if (allCommittees.length === 0) {
       return [];

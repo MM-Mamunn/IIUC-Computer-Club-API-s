@@ -7,19 +7,22 @@ import {
 
 /** GET /committee/president/committees — list all committees for selector */
 export const presidentCommittees = async (c: Context) => {
-  const committees = await getAllCommitteesForPresident();
+  const user = c.get('user');
+  const committees = await getAllCommitteesForPresident(user?.id);
   return c.json({ committees }, 200);
 };
 
 /** GET /committee/president/:number/overview — full committee financial overview */
 export const presidentOverview = async (c: Context) => {
   const number = c.req.param('number');
-  const overview = await getCommitteeOverview(number);
+  const user = c.get('user');
+  const overview = await getCommitteeOverview(number, user?.id);
   return c.json({ overview }, 200);
 };
 
 /** GET /committee/president/all-overviews — ALL committees with full data in one call */
 export const presidentAllOverviews = async (c: Context) => {
-  const overviews = await getAllOverviews();
+  const user = c.get('user');
+  const overviews = await getAllOverviews(user?.id);
   return c.json({ overviews }, 200);
 };

@@ -40,7 +40,11 @@ export const stats = async (c: Context) => {
 };
 
 export const budgetStats = async (c: Context) => {
-  const committeeNumber = c.req.query('committee') || undefined;
+  const user = c.get('user');
+  let committeeNumber = c.req.query('committee') || undefined;
+  if (user?.id === 'DMAU' && !committeeNumber) {
+    committeeNumber = user.committeeNumber || '2026';
+  }
   const budget = await getBudgetStats(committeeNumber);
   return c.json({ budget }, 200);
 };
