@@ -2,7 +2,7 @@ import { db } from '../../config/db';
 import { refundRequests } from '../../db/event.schema';
 import { events, eventRegistrations } from '../../db/event.schema';
 import { users } from '../../db/schema';
-import { eq, and, desc, or } from 'drizzle-orm';
+import { eq, and, desc, or, gt } from 'drizzle-orm';
 import { HTTPException } from 'hono/http-exception';
 import { sendRefundOpenedEmail, sendRefundStatusEmail } from '../../utils/email';
 
@@ -22,7 +22,7 @@ export type RefundStatus =
 export const createRefundCasesForEvent = async (eventId: number) => {
   // Fetch the event to get the fee
   const [event] = await db.select().from(events).where(eq(events.id, eventId));
-  if (!event || !event.isPaid) return; // Only for paid events
+  if (!event || (!event.isPaid && !event.isDonation && (!event.fee || event.fee <= 0))) return; // Only for paid events
 
   // Get all verified registrations
   const regs = await db
@@ -30,6 +30,7 @@ export const createRefundCasesForEvent = async (eventId: number) => {
       userId: eventRegistrations.userId,
       paymentMethod: eventRegistrations.paymentMethod,
       transactionId: eventRegistrations.transactionId,
+      donationAmount: eventRegistrations.donationAmount,
     })
     .from(eventRegistrations)
     .where(
@@ -48,7 +49,8 @@ export const createRefundCasesForEvent = async (eventId: number) => {
       regs.map((r) => ({
         eventId,
         userId: r.userId,
-        refundAmount: event.fee ?? 0,
+        refundAmount:
+          (r.donationAmount && r.donationAmount > 0 ? r.donationAmount : event.fee) ?? 0,
         subsidyAmount: 0, // Set when student picks refund method
         originalPaymentMethod: r.paymentMethod ?? null,
         originalTransactionId: r.transactionId ?? null,
@@ -123,6 +125,46 @@ export const listRefunds = async (eventId?: number, status?: string) => {
 // List refund requests for the logged-in student
 // ─────────────────────────────────────────────────────────────
 export const listMyRefunds = async (userId: string) => {
+  // Auto-heal: Ensure any cancelled paid event registrations for this student have a refund case
+  const unlinked = await db
+    .select({
+      eventId: eventRegistrations.eventId,
+      userId: eventRegistrations.userId,
+      fee: events.fee,
+      donationAmount: eventRegistrations.donationAmount,
+      paymentMethod: eventRegistrations.paymentMethod,
+      transactionId: eventRegistrations.transactionId,
+    })
+    .from(eventRegistrations)
+    .innerJoin(events, eq(eventRegistrations.eventId, events.id))
+    .where(
+      and(
+        eq(eventRegistrations.userId, userId),
+        eq(events.status, 'cancelled'),
+        eq(eventRegistrations.paymentStatus, 'verified'),
+        or(eq(events.isPaid, true), eq(events.isDonation, true), gt(events.fee, 0)),
+      ),
+    );
+
+  if (unlinked.length > 0) {
+    for (const item of unlinked) {
+      const refundAmount =
+        (item.donationAmount && item.donationAmount > 0 ? item.donationAmount : item.fee) ?? 0;
+      await db
+        .insert(refundRequests)
+        .values({
+          eventId: item.eventId,
+          userId: item.userId,
+          refundAmount,
+          subsidyAmount: 0,
+          originalPaymentMethod: item.paymentMethod ?? null,
+          originalTransactionId: item.transactionId ?? null,
+          status: 'pending_destination' as const,
+        })
+        .onConflictDoNothing();
+    }
+  }
+
   const rows = await db
     .select({
       id: refundRequests.id,
