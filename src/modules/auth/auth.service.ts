@@ -32,6 +32,14 @@ export const registerUser = async (
   if (gender !== 'male' && gender !== 'female') {
     throw new HTTPException(400, { message: "Please specify your gender as 'male' or 'female'" });
   }
+
+  email = (email || '').toLowerCase().trim();
+  const emailParts = email.split('@');
+  if (emailParts.length !== 2 || emailParts[0].length < 2 || emailParts[1] !== 'ugrad.iiuc.ac.bd') {
+    throw new HTTPException(400, {
+      message: 'Official IIUC student G-Suite email required (e.g. c221046@ugrad.iiuc.ac.bd)',
+    });
+  }
   const existing = await db.select().from(users).where(eq(users.id, id));
 
   if (existing.length > 0) {
