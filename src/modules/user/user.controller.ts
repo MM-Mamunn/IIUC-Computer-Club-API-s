@@ -8,8 +8,9 @@ export const directory = async (c: Context) => {
   const search = c.req.query('search') || undefined;
   const department = c.req.query('department') || undefined;
   const committee = c.req.query('committee') || undefined;
+  const gender = c.req.query('gender') || undefined;
 
-  const result = await getUserDirectory({ page, limit, search, department, committee });
+  const result = await getUserDirectory({ page, limit, search, department, committee, gender });
   return c.json(result, 200);
 };
 

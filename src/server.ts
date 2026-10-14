@@ -1,11 +1,23 @@
+import 'dotenv/config';
+import { serve } from '@hono/node-server';
 import app from './app';
 
 declare const Bun: any;
 
-Bun.serve({
-  port: Number(process.env.PORT) || 3000,
-  fetch: app.fetch,
-  idleTimeout: 30,
-});
+const port = Number(process.env.PORT) || 5000;
 
-console.log('Server running on http://localhost:' + (Number(process.env.PORT) || 3000));
+if (typeof Bun !== 'undefined') {
+  Bun.serve({
+    port,
+    fetch: app.fetch,
+    idleTimeout: 30,
+  });
+} else {
+  serve({
+    fetch: app.fetch,
+    port,
+  });
+}
+
+console.log(`Server running on http://localhost:${port}`);
+

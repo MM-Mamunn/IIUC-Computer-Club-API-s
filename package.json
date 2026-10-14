@@ -1,5 +1,6 @@
 {
   "name": "iiuc-computer-club-api",
+  "type": "module",
   "private": true,
   "devDependencies": {
     "@types/bcryptjs": "^3.0.0",
@@ -8,6 +9,7 @@
     "@types/nodemailer": "^7.0.11",
     "drizzle-kit": "^0.31.9",
     "esbuild": "^0.27.3",
+    "tsx": "^4.23.15",
     "vercel": "^50.23.1"
   },
   "peerDependencies": {
@@ -26,7 +28,8 @@
     "postgres": "^3.4.8"
   },
   "scripts": {
-    "dev": "bun run --watch src/server.ts",
+    "dev": "tsx watch src/server.ts",
+    "dev:bun": "bun run --watch src/server.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:reset": "bun run src/scripts/reset-db.ts",
