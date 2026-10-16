@@ -22,9 +22,33 @@ export const register = async (c: Context) => {
     gender,
     idCard,
     department,
+    profileImage,
+    description,
+    githubUrl,
+    linkedinUrl,
+    facebookUrl,
+    twitterUrl,
+    batch,
+    skills,
   } = await c.req.json();
 
-  const user = await registerUser(id, name, email, password, gender, idCard, department);
+  const user = await registerUser(
+    id,
+    name,
+    email,
+    password,
+    gender,
+    idCard,
+    department,
+    profileImage,
+    description,
+    githubUrl,
+    linkedinUrl,
+    facebookUrl,
+    twitterUrl,
+    batch,
+    skills,
+  );
 
   return c.json({ token: user.token.token }, 201);
 };
