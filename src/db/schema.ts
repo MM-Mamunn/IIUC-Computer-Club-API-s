@@ -124,3 +124,28 @@ export const newsletterSubscriptions = pgTable('newsletter_subscriptions', {
   source: varchar('source', { length: 50 }).notNull().default('landing-footer'),
   subscribedAt: timestamp('subscribed_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/* =========================
+   COMMITTEE SUBMISSIONS
+========================= */
+export const committeeSubmissions = pgTable('committee_submissions', {
+  id: serial('id').primaryKey(),
+  name: varchar('name', { length: 255 }).notNull(),
+  designation: varchar('designation', { length: 255 }).notNull(),
+  matrixId: varchar('matrix_id', { length: 50 }).notNull(),
+  batch: varchar('batch', { length: 50 }).notNull(),
+  email: varchar('email', { length: 255 }).notNull(),
+  committeeNumber: varchar('committee_number', { length: 255 }),
+  session: varchar('session', { length: 100 }),
+  photoUrl: text('photo_url'),
+  bio: text('bio'),
+  skills: text('skills'),
+  portfolioUrl: text('portfolio_url'),
+  githubUrl: text('github_url'),
+  linkedinUrl: text('linkedin_url'),
+  facebookUrl: text('facebook_url'),
+  status: varchar('status', { length: 50 }).notNull().default('pending'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+

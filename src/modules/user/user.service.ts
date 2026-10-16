@@ -1,5 +1,5 @@
 import { db } from '../../config/db';
-import { users, executives, committee } from '../../db/schema';
+import { users, executives, committee, committeeSubmissions } from '../../db/schema';
 import { roles as rolesTable } from '../../db/schema';
 import { events, eventRegistrations, eventExpenses, vouchers } from '../../db/event.schema';
 import { eq, and, ilike, or, count, isNull, sum, inArray, desc, type SQL } from 'drizzle-orm';
@@ -12,8 +12,9 @@ export const getUserDirectory = async (params: {
   search?: string;
   department?: string;
   committee?: string;
+  gender?: string;
 }) => {
-  const { page, limit, search, department, committee: commNumber } = params;
+  const { page, limit, search, department, committee: commNumber, gender } = params;
   const offset = (page - 1) * limit;
 
   const conditions: SQL[] = [];
@@ -33,21 +34,32 @@ export const getUserDirectory = async (params: {
   }
 
   if (commNumber) {
-    const subquery = db
+    const execSubquery = db
       .select({ id: executives.id })
       .from(executives)
       .where(eq(executives.number, commNumber));
-    conditions.push(inArray(users.id, subquery));
+    const subSubquery = db
+      .select({ id: committeeSubmissions.matrixId })
+      .from(committeeSubmissions)
+      .where(eq(committeeSubmissions.committeeNumber, commNumber));
+    conditions.push(or(inArray(users.id, execSubquery), inArray(users.id, subSubquery))!);
+  }
+
+  if (gender && gender !== 'all') {
+    conditions.push(ilike(users.gender, gender));
   }
 
   const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
-  const [countResult] = await db
-    .select({ count: count() })
-    .from(users)
-    .where(whereClause);
+  const [[countResult], [maleCountResult], [femaleCountResult]] = await Promise.all([
+    db.select({ count: count() }).from(users).where(whereClause),
+    db.select({ count: count() }).from(users).where(ilike(users.gender, 'male')),
+    db.select({ count: count() }).from(users).where(ilike(users.gender, 'female')),
+  ]);
 
   const total = countResult?.count ?? 0;
+  const maleCount = maleCountResult?.count ?? 0;
+  const femaleCount = femaleCountResult?.count ?? 0;
 
   const userResults = await db
     .select({
@@ -58,6 +70,11 @@ export const getUserDirectory = async (params: {
       profileImage: users.profileImage,
       idCard: users.idCard,
       department: users.department,
+      description: users.description,
+      githubUrl: users.githubUrl,
+      linkedinUrl: users.linkedinUrl,
+      facebookUrl: users.facebookUrl,
+      twitterUrl: users.twitterUrl,
       createdAt: users.createdAt,
     })
     .from(users)
@@ -68,29 +85,62 @@ export const getUserDirectory = async (params: {
 
   const userIds = userResults.map((u) => u.id);
   const execMap = new Map<string, any[]>();
+  const subMap = new Map<string, any>();
 
   if (userIds.length > 0) {
-    const execs = await db
-      .select({
-        id: executives.id,
-        role: executives.role,
-        position: executives.position,
-        number: executives.number,
-      })
-      .from(executives)
-      .where(inArray(executives.id, userIds));
+    const [execs, subs] = await Promise.all([
+      db
+        .select({
+          id: executives.id,
+          role: executives.role,
+          position: executives.position,
+          number: executives.number,
+        })
+        .from(executives)
+        .where(inArray(executives.id, userIds)),
+      db
+        .select()
+        .from(committeeSubmissions)
+        .where(inArray(committeeSubmissions.matrixId, userIds)),
+    ]);
 
     for (const e of execs) {
       const arr = execMap.get(e.id) || [];
       arr.push({ role: e.role, position: e.position, committeeNumber: e.number });
       execMap.set(e.id, arr);
     }
+
+    for (const s of subs) {
+      subMap.set(s.matrixId.toUpperCase(), s);
+    }
   }
 
-  const usersWithExecDetails = userResults.map((u) => ({
-    ...u,
-    executives: execMap.get(u.id) || [],
-  }));
+  const usersWithExecDetails = userResults.map((u) => {
+    const s = subMap.get(u.id.toUpperCase());
+    return {
+      ...u,
+      batch: s?.batch || null,
+      skills: s?.skills || null,
+      designation: s?.designation || null,
+      portfolioUrl: s?.portfolioUrl || u.twitterUrl || null,
+      description: u.description || s?.bio || null,
+      githubUrl: u.githubUrl || s?.githubUrl || null,
+      linkedinUrl: u.linkedinUrl || s?.linkedinUrl || null,
+      facebookUrl: u.facebookUrl || s?.facebookUrl || null,
+      executives:
+        (execMap.get(u.id) && execMap.get(u.id)!.length > 0)
+          ? execMap.get(u.id)!
+          : s?.committeeNumber
+          ? [
+              {
+                role: s.designation || 'Member',
+                position: s.designation || 'Executive Member',
+                committeeNumber: s.committeeNumber,
+              },
+            ]
+          : [],
+    };
+  });
 
   return {
     users: usersWithExecDetails,
@@ -98,6 +148,8 @@ export const getUserDirectory = async (params: {
     page,
     limit,
     totalPages: Math.ceil(total / limit),
+    maleCount,
+    femaleCount,
   };
 };
 

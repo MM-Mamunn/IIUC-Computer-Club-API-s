@@ -6,6 +6,9 @@ import {
   allCommittees,
   close,
   members,
+  createSubmission,
+  getSubmission,
+  listSubmissions,
 } from './committee.controller';
 import {
   presidentCommittees,
@@ -23,6 +26,13 @@ router.post('/new', authMiddleware, requireRole(await getRolesByPriorityRange(1,
 router.get('/active', activeCommittees);
 
 router.get('/all', allCommittees);
+
+// ─── Authenticated Committee Member Applications ───
+router.post('/submission', authMiddleware, createSubmission);
+router.get('/submission/:matrixId', authMiddleware, getSubmission);
+router.get('/submissions', authMiddleware, listSubmissions);
+
+
 
 // ─── President-only: Committee overview with full financial records ───
 router.get(

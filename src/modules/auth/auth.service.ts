@@ -1,5 +1,5 @@
 import { db } from '../../config/db';
-import { executives, users } from '../../db/schema';
+import { executives, users, committeeSubmissions } from '../../db/schema';
 import { and, eq, inArray, desc } from 'drizzle-orm';
 import { hashPassword, comparePassword } from '../../utils/hash';
 import { generateToken } from '../../utils/jwt';
@@ -18,6 +18,14 @@ export const registerUser = async (
   gender: string,
   idCard?: string,
   department?: string,
+  profileImage?: string,
+  description?: string,
+  githubUrl?: string,
+  linkedinUrl?: string,
+  facebookUrl?: string,
+  twitterUrl?: string,
+  batch?: string,
+  skills?: string[] | string,
 ) => {
   if (id.trim() !== id) {
     throw new HTTPException(400, { message: 'ID cannot contain leading or trailing spaces' });
@@ -32,10 +40,23 @@ export const registerUser = async (
   if (gender !== 'male' && gender !== 'female') {
     throw new HTTPException(400, { message: "Please specify your gender as 'male' or 'female'" });
   }
+
+  email = (email || '').toLowerCase().trim();
+  const emailParts = email.split('@');
+  if (emailParts.length !== 2 || emailParts[0].length < 2 || emailParts[1] !== 'ugrad.iiuc.ac.bd') {
+    throw new HTTPException(400, {
+      message: 'Official IIUC student G-Suite email required (e.g. c221046@ugrad.iiuc.ac.bd)',
+    });
+  }
   const existing = await db.select().from(users).where(eq(users.id, id));
 
   if (existing.length > 0) {
     throw new HTTPException(409, { message: 'An account with this ID already exists' });
+  }
+
+  const existingEmail = await db.select().from(users).where(eq(users.email, email));
+  if (existingEmail.length > 0) {
+    throw new HTTPException(409, { message: 'An account with this official email already exists' });
   }
 
   if (password.length < 6) {
@@ -46,14 +67,85 @@ export const registerUser = async (
 
   const [newUser] = await db
     .insert(users)
-    .values({ id, name, email, password: hashed, gender, idCard, department })
+    .values({
+      id,
+      name,
+      email,
+      password: hashed,
+      gender,
+      idCard: idCard || null,
+      department: department || 'Dept. of CSE',
+      profileImage: profileImage || null,
+      description: description || null,
+      githubUrl: githubUrl || null,
+      linkedinUrl: linkedinUrl || null,
+      facebookUrl: facebookUrl || null,
+      twitterUrl: twitterUrl || null,
+    })
     .returning();
 
   if (!newUser) {
     throw new HTTPException(401, { message: 'Failed to create user' });
   }
+
+  // Record member metadata without connecting to any committee
+  try {
+    const formattedSkills = skills
+      ? typeof skills === 'string'
+        ? skills
+        : JSON.stringify(skills)
+      : null;
+
+    const [existingSub] = await db
+      .select()
+      .from(committeeSubmissions)
+      .where(eq(committeeSubmissions.matrixId, id))
+      .limit(1);
+
+    if (existingSub) {
+      await db
+        .update(committeeSubmissions)
+        .set({
+          name,
+          batch: batch || existingSub.batch,
+          email,
+          photoUrl: profileImage || existingSub.photoUrl,
+          bio: description || existingSub.bio,
+          skills: formattedSkills || existingSub.skills,
+          githubUrl: githubUrl || existingSub.githubUrl,
+          linkedinUrl: linkedinUrl || existingSub.linkedinUrl,
+          facebookUrl: facebookUrl || existingSub.facebookUrl,
+          portfolioUrl: twitterUrl || existingSub.portfolioUrl,
+          updatedAt: new Date(),
+        })
+        .where(eq(committeeSubmissions.id, existingSub.id));
+    } else {
+      await db.insert(committeeSubmissions).values({
+        name,
+        designation: 'General Member',
+        matrixId: id,
+        batch: batch || 'General',
+        email,
+        committeeNumber: null,
+        session: null,
+        photoUrl: profileImage || null,
+        bio: description || null,
+        skills: formattedSkills,
+        portfolioUrl: twitterUrl || null,
+        githubUrl: githubUrl || null,
+        linkedinUrl: linkedinUrl || null,
+        facebookUrl: facebookUrl || null,
+        status: 'approved',
+      });
+    }
+  } catch (err) {
+    console.warn('Could not store member submission metadata:', err);
+  }
+
+  invalidate('dashboard:');
+  invalidate('users:');
+
   const token = await loginUser(id, password);
-  // return newUser;
   return { token };
 };
 export const loginUser = async (id: string, password: string) => {

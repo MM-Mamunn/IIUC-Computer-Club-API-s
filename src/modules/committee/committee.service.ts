@@ -1,10 +1,11 @@
 // committee.service.ts
 import type { Context } from 'hono';
 import { db } from '../../config/db';
-import { committee, executives, users } from '../../db/schema';
+import { committee, executives, users, committeeSubmissions } from '../../db/schema';
 import { HTTPException } from 'hono/http-exception';
 import { and, eq, isNull, isNotNull, desc, or } from 'drizzle-orm';
 import { cached, invalidate } from '../../utils/cache';
+import { uploadImageToCloudinary } from '../../utils/uploadImage';
 
 export const addCommittee = async (
   number: string,
@@ -40,7 +41,9 @@ export const addCommittee = async (
     });
   }
 
-  const femaleNumber = `${number} Female`;
+  const cleanNumber = number.trim().replace(/F$/i, '');
+  const maleNumber = cleanNumber;
+  const femaleNumber = `${cleanNumber}F`;
 
   // Check if any active committee already exists for either gender
   const activeCommittees = await db
@@ -61,7 +64,7 @@ export const addCommittee = async (
   const existing = await db
     .select()
     .from(committee)
-    .where(or(eq(committee.number, number), eq(committee.number, femaleNumber)))
+    .where(or(eq(committee.number, maleNumber), eq(committee.number, femaleNumber)))
     .limit(1);
 
   if (existing.length > 0) {
@@ -74,13 +77,13 @@ export const addCommittee = async (
   const [maleCommittee] = await db
     .insert(committee)
     .values({
-      number,
+      number: maleNumber,
       start,
       session,
       gender: 'male',
       end: null,
       beginningBudget,
-      description: description ?? null,
+      description: description ?? `IIUC Computer Club Committee ${maleNumber} (Male)`,
     })
     .returning();
 
@@ -91,7 +94,7 @@ export const addCommittee = async (
     gender: 'female',
     end: null,
     beginningBudget: null,
-    description: description ?? null,
+    description: description ? `${description} (Female)` : `IIUC Computer Club Executive Committee ${femaleNumber} (Female)`,
   });
 
   // Assign the creator as president of both committees
@@ -241,3 +244,184 @@ export const showMembers = async (number: string) => {
       .where(eq(executives.number, number));
   });
 };
+
+// ─── Committee Member Application Submissions ───
+
+export interface CommitteeSubmissionInput {
+  name: string;
+  designation: string;
+  matrixId: string;
+  batch: string;
+  email: string;
+  committeeNumber?: string | null;
+  session?: string | null;
+  photo?: File | string | null;
+  bio?: string | null;
+  skills?: string | null;
+  portfolioUrl?: string | null;
+  githubUrl?: string | null;
+  linkedinUrl?: string | null;
+  facebookUrl?: string | null;
+}
+
+export const submitCommitteeApplication = async (data: CommitteeSubmissionInput) => {
+  const name = data.name?.trim();
+  const designation = data.designation?.trim();
+  const matrixId = data.matrixId?.trim().toUpperCase();
+  const batch = data.batch?.trim();
+  const email = data.email?.trim().toLowerCase();
+
+  if (!name) {
+    throw new HTTPException(400, { message: 'Full Name is required' });
+  }
+  if (!designation) {
+    throw new HTTPException(400, { message: 'Designation role is required' });
+  }
+  if (!matrixId) {
+    throw new HTTPException(400, { message: 'Matrix ID is required' });
+  }
+  if (!batch) {
+    throw new HTTPException(400, { message: 'Batch selection is required' });
+  }
+  if (!email) {
+    throw new HTTPException(400, { message: 'Student Email is required' });
+  }
+
+  // Strict IIUC Undergraduate email validation
+  if (!email.endsWith('@ugrad.iiuc.ac.bd')) {
+    throw new HTTPException(400, {
+      message: 'Official IIUC student email required. Email must end with @ugrad.iiuc.ac.bd',
+    });
+  }
+
+  // Auto-resolve active committee number and session if not explicitly provided
+  let commNumber = data.committeeNumber?.trim() || null;
+  let commSession = data.session?.trim() || null;
+
+  if (!commNumber || !commSession) {
+    const activeComms = await db
+      .select({ number: committee.number, session: committee.session, gender: committee.gender })
+      .from(committee)
+      .where(isNull(committee.end))
+      .orderBy(desc(committee.start));
+
+    const latestComm =
+      activeComms[0] ||
+      (
+        await db
+          .select({ number: committee.number, session: committee.session, gender: committee.gender })
+          .from(committee)
+          .orderBy(desc(committee.start))
+          .limit(1)
+      )[0];
+
+    if (latestComm) {
+      if (!commNumber) commNumber = latestComm.number;
+      if (!commSession) commSession = latestComm.session;
+    }
+  }
+
+  // Handle photo upload if provided
+  let photoUrl: string | null = null;
+  if (data.photo && typeof data.photo === 'object' && 'arrayBuffer' in data.photo) {
+    const file = data.photo as File;
+    if (file.size > 0) {
+      photoUrl = await uploadImageToCloudinary(file);
+    }
+  } else if (typeof data.photo === 'string' && data.photo.trim().length > 0) {
+    photoUrl = data.photo.trim();
+  }
+
+  // Check if an application already exists for this matrixId
+  const existing = await db
+    .select()
+    .from(committeeSubmissions)
+    .where(eq(committeeSubmissions.matrixId, matrixId))
+    .limit(1);
+
+  if (existing.length > 0) {
+    const [updated] = await db
+      .update(committeeSubmissions)
+      .set({
+        name,
+        designation,
+        batch,
+        email,
+        committeeNumber: commNumber ?? existing[0].committeeNumber,
+        session: commSession ?? existing[0].session,
+        photoUrl: photoUrl ?? existing[0].photoUrl,
+        bio: data.bio?.trim() || null,
+        skills: data.skills ? (typeof data.skills === 'string' ? data.skills : JSON.stringify(data.skills)) : null,
+        portfolioUrl: data.portfolioUrl?.trim() || null,
+        githubUrl: data.githubUrl?.trim() || null,
+        linkedinUrl: data.linkedinUrl?.trim() || null,
+        facebookUrl: data.facebookUrl?.trim() || null,
+        updatedAt: new Date(),
+      })
+      .where(eq(committeeSubmissions.id, existing[0].id))
+      .returning();
+
+    invalidate('dashboard:');
+    invalidate('committee:members:');
+    invalidate('president:');
+
+    return {
+      submission: updated,
+      isUpdate: true,
+      message: 'Application updated successfully!',
+    };
+  }
+
+  const [created] = await db
+    .insert(committeeSubmissions)
+    .values({
+      name,
+      designation,
+      matrixId,
+      batch,
+      email,
+      committeeNumber: commNumber || null,
+      session: commSession || null,
+      photoUrl: photoUrl || null,
+      bio: data.bio?.trim() || null,
+      skills: data.skills ? (typeof data.skills === 'string' ? data.skills : JSON.stringify(data.skills)) : null,
+      portfolioUrl: data.portfolioUrl?.trim() || null,
+      githubUrl: data.githubUrl?.trim() || null,
+      linkedinUrl: data.linkedinUrl?.trim() || null,
+      facebookUrl: data.facebookUrl?.trim() || null,
+      status: 'pending',
+    })
+    .returning();
+
+  invalidate('dashboard:');
+  invalidate('committee:members:');
+  invalidate('president:');
+
+  return {
+    submission: created,
+    isUpdate: false,
+    message: 'Application submitted successfully!',
+  };
+};
+
+export const getCommitteeSubmissionByMatrixId = async (matrixId: string) => {
+  const [sub] = await db
+    .select()
+    .from(committeeSubmissions)
+    .where(eq(committeeSubmissions.matrixId, matrixId.toUpperCase().trim()))
+    .limit(1);
+
+  if (!sub) {
+    throw new HTTPException(404, { message: 'Submission not found for this Matrix ID' });
+  }
+
+  return sub;
+};
+
+export const getAllCommitteeSubmissions = async () => {
+  return db
+    .select()
+    .from(committeeSubmissions)
+    .orderBy(desc(committeeSubmissions.createdAt));
+};
+
