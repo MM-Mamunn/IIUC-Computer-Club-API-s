@@ -30,6 +30,9 @@ export const register = async (c: Context) => {
     twitterUrl,
     batch,
     skills,
+    designation,
+    committeeNumber,
+    session,
   } = await c.req.json();
 
   const user = await registerUser(
@@ -48,6 +51,9 @@ export const register = async (c: Context) => {
     twitterUrl,
     batch,
     skills,
+    designation,
+    committeeNumber,
+    session,
   );
 
   return c.json({ token: user.token.token }, 201);

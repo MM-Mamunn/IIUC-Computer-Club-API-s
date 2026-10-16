@@ -1,6 +1,6 @@
 import { db } from '../../config/db';
 import { executives, users, committeeSubmissions } from '../../db/schema';
-import { and, eq, inArray, desc } from 'drizzle-orm';
+import { and, eq, inArray, desc, or } from 'drizzle-orm';
 import { hashPassword, comparePassword } from '../../utils/hash';
 import { generateToken } from '../../utils/jwt';
 import { HTTPException } from 'hono/http-exception';
@@ -26,6 +26,9 @@ export const registerUser = async (
   twitterUrl?: string,
   batch?: string,
   skills?: string[] | string,
+  designation?: string,
+  committeeNumber?: string,
+  session?: string,
 ) => {
   if (id.trim() !== id) {
     throw new HTTPException(400, { message: 'ID cannot contain leading or trailing spaces' });
@@ -107,8 +110,11 @@ export const registerUser = async (
         .update(committeeSubmissions)
         .set({
           name,
+          designation: designation || existingSub.designation || 'General Member',
           batch: batch || existingSub.batch,
           email,
+          committeeNumber: committeeNumber !== undefined ? committeeNumber : existingSub.committeeNumber,
+          session: session !== undefined ? session : existingSub.session,
           photoUrl: profileImage || existingSub.photoUrl,
           bio: description || existingSub.bio,
           skills: formattedSkills || existingSub.skills,
@@ -122,12 +128,12 @@ export const registerUser = async (
     } else {
       await db.insert(committeeSubmissions).values({
         name,
-        designation: 'General Member',
+        designation: designation || 'General Member',
         matrixId: id,
         batch: batch || 'General',
         email,
-        committeeNumber: null,
-        session: null,
+        committeeNumber: committeeNumber || null,
+        session: session || null,
         photoUrl: profileImage || null,
         bio: description || null,
         skills: formattedSkills,
@@ -320,7 +326,7 @@ export const showMe = async (c: Context) => {
       linkedinUrl: users.linkedinUrl,
       facebookUrl: users.facebookUrl,
       twitterUrl: users.twitterUrl,
-      createdat: users.createdAt,
+      createdAt: users.createdAt,
     })
     .from(users)
     .where(eq(users.id, user.id));
@@ -328,7 +334,34 @@ export const showMe = async (c: Context) => {
   if (!me) {
     throw new HTTPException(404, { message: 'User not found' });
   }
-  return me;
+
+  // Also query committee_submissions to get batch, skills, designation, committeeNumber, session, portfolioUrl
+  const [submission] = await db
+    .select()
+    .from(committeeSubmissions)
+    .where(or(eq(committeeSubmissions.matrixId, user.id), eq(committeeSubmissions.email, me.email)))
+    .orderBy(desc(committeeSubmissions.id))
+    .limit(1);
+
+  let skillsList: string[] = [];
+  if (submission?.skills) {
+    try {
+      const parsed = JSON.parse(submission.skills);
+      skillsList = Array.isArray(parsed) ? parsed : [submission.skills];
+    } catch {
+      skillsList = submission.skills.split(',').map((s) => s.trim()).filter(Boolean);
+    }
+  }
+
+  return {
+    ...me,
+    batch: submission?.batch || null,
+    skills: skillsList,
+    designation: submission?.designation || null,
+    committeeNumber: submission?.committeeNumber || null,
+    session: submission?.session || null,
+    portfolioUrl: submission?.portfolioUrl || me.twitterUrl || null,
+  };
 };
 
 type UpdateUserInput = {
@@ -336,54 +369,151 @@ type UpdateUserInput = {
   name?: string;
   email?: string;
   gender?: string;
+  department?: string;
   profileImage?: string;
   description?: string;
   githubUrl?: string | null;
   linkedinUrl?: string | null;
   facebookUrl?: string | null;
   twitterUrl?: string | null;
+  portfolioUrl?: string | null;
+  batch?: string | null;
+  skills?: string[] | string | null;
+  designation?: string | null;
+  committeeNumber?: string | null;
+  session?: string | null;
 };
 
 export const updateUser = async (data: UpdateUserInput, c: Context) => {
-  const { ...fields } = data;
+  const { batch, skills, designation, committeeNumber, session, portfolioUrl, ...userFields } = data;
   const user = c.get('user');
   if (!user.id) {
     throw new HTTPException(400, { message: 'User id is required' });
   }
 
-  // remove undefined fields
-  const updateData = Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined));
-
-  if (Object.keys(updateData).length === 0) {
-    throw new HTTPException(400, { message: 'No fields provided for update' });
+  if (portfolioUrl !== undefined && userFields.twitterUrl === undefined) {
+    userFields.twitterUrl = portfolioUrl;
   }
+
+  // remove undefined fields for users table
+  const updateData = Object.fromEntries(Object.entries(userFields).filter(([, v]) => v !== undefined));
+
   if (updateData.password) {
     throw new HTTPException(400, { message: "Can't change password through this endpoint" });
   }
-  const [updatedUser] = await db
-    .update(users)
-    .set(updateData)
-    .where(eq(users.id, user.id))
-    .returning({
-      id: users.id,
-      name: users.name,
-      gender: users.gender,
-      email: users.email,
-      description: users.description,
-      profileImage: users.profileImage,
-      githubUrl: users.githubUrl,
-      linkedinUrl: users.linkedinUrl,
-      facebookUrl: users.facebookUrl,
-      twitterUrl: users.twitterUrl,
-      createdAt: users.createdAt,
-    });
+
+  let updatedUser;
+  if (Object.keys(updateData).length > 0) {
+    const [res] = await db
+      .update(users)
+      .set(updateData)
+      .where(eq(users.id, user.id))
+      .returning({
+        id: users.id,
+        name: users.name,
+        gender: users.gender,
+        email: users.email,
+        department: users.department,
+        description: users.description,
+        profileImage: users.profileImage,
+        githubUrl: users.githubUrl,
+        linkedinUrl: users.linkedinUrl,
+        facebookUrl: users.facebookUrl,
+        twitterUrl: users.twitterUrl,
+        createdAt: users.createdAt,
+      });
+    updatedUser = res;
+  } else {
+    const [res] = await db.select().from(users).where(eq(users.id, user.id));
+    updatedUser = res;
+  }
+
   if (!updatedUser) {
     throw new HTTPException(404, { message: 'User not found' });
   }
 
+  // Format skills
+  const formattedSkills = Array.isArray(skills)
+    ? JSON.stringify(skills)
+    : typeof skills === 'string'
+    ? skills
+    : undefined;
+
+  // Sync committee_submissions
+  const [existingSub] = await db
+    .select()
+    .from(committeeSubmissions)
+    .where(or(eq(committeeSubmissions.matrixId, user.id), eq(committeeSubmissions.email, updatedUser.email)))
+    .orderBy(desc(committeeSubmissions.id))
+    .limit(1);
+
+  if (existingSub) {
+    await db
+      .update(committeeSubmissions)
+      .set({
+        name: updatedUser.name,
+        designation: designation !== undefined ? (designation || existingSub.designation || 'General Member') : existingSub.designation,
+        batch: batch !== undefined ? (batch || existingSub.batch) : existingSub.batch,
+        email: updatedUser.email,
+        committeeNumber: committeeNumber !== undefined ? committeeNumber : existingSub.committeeNumber,
+        session: session !== undefined ? session : existingSub.session,
+        photoUrl: updatedUser.profileImage || existingSub.photoUrl,
+        bio: updatedUser.description !== undefined ? updatedUser.description : existingSub.bio,
+        skills: formattedSkills !== undefined ? formattedSkills : existingSub.skills,
+        portfolioUrl: (portfolioUrl !== undefined ? portfolioUrl : existingSub.portfolioUrl) || updatedUser.twitterUrl || null,
+        githubUrl: updatedUser.githubUrl !== undefined ? updatedUser.githubUrl : existingSub.githubUrl,
+        linkedinUrl: updatedUser.linkedinUrl !== undefined ? updatedUser.linkedinUrl : existingSub.linkedinUrl,
+        facebookUrl: updatedUser.facebookUrl !== undefined ? updatedUser.facebookUrl : existingSub.facebookUrl,
+        updatedAt: new Date(),
+      })
+      .where(eq(committeeSubmissions.id, existingSub.id));
+  } else if (batch || designation || committeeNumber || session || formattedSkills || portfolioUrl) {
+    // Insert new committee submission record if user didn't have one before
+    await db.insert(committeeSubmissions).values({
+      name: updatedUser.name,
+      designation: designation || 'General Member',
+      matrixId: user.id,
+      batch: batch || 'Batch 58',
+      email: updatedUser.email,
+      committeeNumber: committeeNumber || null,
+      session: session || null,
+      photoUrl: updatedUser.profileImage || null,
+      bio: updatedUser.description || null,
+      skills: formattedSkills || '[]',
+      portfolioUrl: portfolioUrl || updatedUser.twitterUrl || null,
+      githubUrl: updatedUser.githubUrl || null,
+      linkedinUrl: updatedUser.linkedinUrl || null,
+      facebookUrl: updatedUser.facebookUrl || null,
+      status: 'pending',
+    });
+  }
+
   invalidateUserCaches();
 
-  return updatedUser;
+  let finalSkills: string[] = [];
+  if (formattedSkills) {
+    try {
+      finalSkills = JSON.parse(formattedSkills);
+    } catch {
+      finalSkills = formattedSkills.split(',').map((s) => s.trim()).filter(Boolean);
+    }
+  } else if (existingSub?.skills) {
+    try {
+      finalSkills = JSON.parse(existingSub.skills);
+    } catch {
+      finalSkills = existingSub.skills.split(',').map((s) => s.trim()).filter(Boolean);
+    }
+  }
+
+  return {
+    ...updatedUser,
+    batch: batch !== undefined ? batch : existingSub?.batch || null,
+    skills: finalSkills,
+    designation: designation !== undefined ? designation : existingSub?.designation || null,
+    committeeNumber: committeeNumber !== undefined ? committeeNumber : existingSub?.committeeNumber || null,
+    session: session !== undefined ? session : existingSub?.session || null,
+    portfolioUrl: portfolioUrl || updatedUser.twitterUrl || null,
+  };
 };
 
 // FUNCTIONS TO ADD VICE PRESIDENT
