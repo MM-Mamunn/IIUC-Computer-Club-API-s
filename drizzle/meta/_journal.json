@@ -204,6 +204,13 @@
       "when": 1782418208221,
       "tag": "0028_shocking_wolfpack",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1792167562629,
+      "tag": "0029_smart_talos",
+      "breakpoints": true
     }
   ]
 }
