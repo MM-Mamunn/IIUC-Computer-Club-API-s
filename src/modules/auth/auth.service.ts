@@ -150,6 +150,7 @@ export const registerUser = async (
 
   invalidate('dashboard:');
   invalidate('users:');
+  invalidate('committee:');
 
   const token = await loginUser(id, password);
   return { token };

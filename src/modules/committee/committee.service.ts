@@ -3,7 +3,7 @@ import type { Context } from 'hono';
 import { db } from '../../config/db';
 import { committee, executives, users, committeeSubmissions } from '../../db/schema';
 import { HTTPException } from 'hono/http-exception';
-import { and, eq, isNull, isNotNull, desc, or } from 'drizzle-orm';
+import { and, eq, isNull, isNotNull, desc, or, ne } from 'drizzle-orm';
 import { cached, invalidate } from '../../utils/cache';
 import { uploadImageToCloudinary } from '../../utils/uploadImage';
 
@@ -215,7 +215,26 @@ export const closeCommittee = async (number: string, endDate: string, userId?: s
   return updated;
 };
 
-// ─── Show Committee Members (cached 60s) ───
+export function mapDesignationToRole(designation: string): string {
+  const d = designation.toLowerCase().trim();
+  if (d === 'president') return 'president';
+  if (d.includes('vice president 1') || d.includes('vice president-1')) return 'vice president 1';
+  if (d.includes('vice president 2') || d.includes('vice president-2')) return 'vice president 2';
+  if (d.includes('vice president 3') || d.includes('vice president-3')) return 'vice president 3';
+  if (d.includes('vice president 4') || d.includes('vice president-4')) return 'vice president 4';
+  if (d.includes('vice president')) return 'vice president';
+  if (d.includes('treasurer')) return 'treasurer';
+  if (d.includes('assistant general secretary 1') || d.includes('assistant general secretary-1')) return 'assistant general secretary 1';
+  if (d.includes('assistant general secretary 2') || d.includes('assistant general secretary-2')) return 'assistant general secretary 2';
+  if (d.includes('assistant general secretary 3') || d.includes('assistant general secretary-3')) return 'assistant general secretary 3';
+  if (d.includes('assistant general secretary')) return 'assistant general secretary 1';
+  if (d.includes('general secretary')) return 'general secretary';
+  if (d.includes('assistant') && d.includes('secretary')) return 'assistant secretary';
+  if (d.includes('secretary')) return 'secretary';
+  return 'executive member';
+}
+
+// ─── Show Committee Members (cached 15s) ───
 export const showMembers = async (number: string) => {
   const [com] = await db.select().from(committee).where(eq(committee.number, number));
 
@@ -223,8 +242,9 @@ export const showMembers = async (number: string) => {
     throw new HTTPException(404, { message: 'Committee not found' });
   }
 
-  return cached(`committee:members:${number}`, 60_000, async () => {
-    return db
+  return cached(`committee:members:${number}`, 15_000, async () => {
+    // 1. Fetch executives joined with users
+    const execMembers = await db
       .select({
         id: executives.id,
         name: users.name,
@@ -238,10 +258,121 @@ export const showMembers = async (number: string) => {
         linkedinUrl: users.linkedinUrl,
         facebookUrl: users.facebookUrl,
         twitterUrl: users.twitterUrl,
+        department: users.department,
       })
       .from(executives)
       .innerJoin(users, eq(executives.id, users.id))
       .where(eq(executives.number, number));
+
+    // 2. Fetch committee submissions for this committee (pending or approved)
+    const submissions = await db
+      .select()
+      .from(committeeSubmissions)
+      .where(
+        and(
+          eq(committeeSubmissions.committeeNumber, number),
+          ne(committeeSubmissions.status, 'rejected'),
+        ),
+      );
+
+    const subMap = new Map<string, (typeof submissions)[0]>();
+    for (const sub of submissions) {
+      if (sub.matrixId) {
+        subMap.set(sub.matrixId.toUpperCase(), sub);
+      }
+    }
+
+    interface FormattedMember {
+      id: string;
+      name: string;
+      email: string | null;
+      gender: string;
+      profileImage: string | null;
+      role: string | null;
+      position: string | null;
+      bio: string | null;
+      githubUrl: string | null;
+      linkedinUrl: string | null;
+      facebookUrl: string | null;
+      twitterUrl: string | null;
+      batch: string | null;
+      skills: string[] | null;
+      department: string | null;
+      portfolioUrl: string | null;
+      websiteUrl: string | null;
+    }
+
+    const memberMap = new Map<string, FormattedMember>();
+
+    for (const em of execMembers) {
+      const sub = subMap.get(em.id.toUpperCase());
+      let parsedSkills: string[] | null = null;
+      if (sub?.skills) {
+        try {
+          parsedSkills = JSON.parse(sub.skills);
+        } catch {
+          parsedSkills = sub.skills ? sub.skills.split(',').map((s) => s.trim()) : null;
+        }
+      }
+
+      memberMap.set(em.id.toUpperCase(), {
+        id: em.id,
+        name: sub?.name || em.name,
+        email: sub?.email || em.email,
+        gender: em.gender || com.gender || 'male',
+        profileImage: sub?.photoUrl || em.profileImage || null,
+        role: em.role || (sub?.designation ? mapDesignationToRole(sub.designation) : 'executive member'),
+        position: sub?.designation || em.position || em.role || 'Executive Member',
+        bio: sub?.bio || em.bio || null,
+        githubUrl: sub?.githubUrl || em.githubUrl || null,
+        linkedinUrl: sub?.linkedinUrl || em.linkedinUrl || null,
+        facebookUrl: sub?.facebookUrl || em.facebookUrl || null,
+        twitterUrl: em.twitterUrl || null,
+        batch: sub?.batch || null,
+        skills: parsedSkills,
+        department: em.department || 'Dept. of CSE',
+        portfolioUrl: sub?.portfolioUrl || em.twitterUrl || null,
+        websiteUrl: sub?.portfolioUrl || em.twitterUrl || null,
+      });
+    }
+
+    // Include any submissions not already in executives
+    for (const sub of submissions) {
+      const idKey = sub.matrixId.toUpperCase();
+      if (!memberMap.has(idKey)) {
+        const [u] = await db.select().from(users).where(eq(users.id, sub.matrixId)).limit(1);
+        let parsedSkills: string[] | null = null;
+        if (sub.skills) {
+          try {
+            parsedSkills = JSON.parse(sub.skills);
+          } catch {
+            parsedSkills = sub.skills ? sub.skills.split(',').map((s) => s.trim()) : null;
+          }
+        }
+
+        memberMap.set(idKey, {
+          id: sub.matrixId,
+          name: sub.name,
+          email: sub.email,
+          gender: u?.gender || com.gender || 'male',
+          profileImage: sub.photoUrl || u?.profileImage || null,
+          role: mapDesignationToRole(sub.designation),
+          position: sub.designation,
+          bio: sub.bio || u?.description || null,
+          githubUrl: sub.githubUrl || u?.githubUrl || null,
+          linkedinUrl: sub.linkedinUrl || u?.linkedinUrl || null,
+          facebookUrl: sub.facebookUrl || u?.facebookUrl || null,
+          twitterUrl: sub.portfolioUrl || u?.twitterUrl || null,
+          batch: sub.batch,
+          skills: parsedSkills,
+          department: u?.department || 'Dept. of CSE',
+          portfolioUrl: sub.portfolioUrl || null,
+          websiteUrl: sub.portfolioUrl || null,
+        });
+      }
+    }
+
+    return Array.from(memberMap.values());
   });
 };
 
