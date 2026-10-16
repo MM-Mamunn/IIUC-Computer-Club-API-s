@@ -26,6 +26,9 @@ export const registerUser = async (
   twitterUrl?: string,
   batch?: string,
   skills?: string[] | string,
+  designation?: string,
+  committeeNumber?: string,
+  session?: string,
 ) => {
   if (id.trim() !== id) {
     throw new HTTPException(400, { message: 'ID cannot contain leading or trailing spaces' });
@@ -107,8 +110,11 @@ export const registerUser = async (
         .update(committeeSubmissions)
         .set({
           name,
+          designation: designation || existingSub.designation || 'General Member',
           batch: batch || existingSub.batch,
           email,
+          committeeNumber: committeeNumber !== undefined ? committeeNumber : existingSub.committeeNumber,
+          session: session !== undefined ? session : existingSub.session,
           photoUrl: profileImage || existingSub.photoUrl,
           bio: description || existingSub.bio,
           skills: formattedSkills || existingSub.skills,
@@ -122,12 +128,12 @@ export const registerUser = async (
     } else {
       await db.insert(committeeSubmissions).values({
         name,
-        designation: 'General Member',
+        designation: designation || 'General Member',
         matrixId: id,
         batch: batch || 'General',
         email,
-        committeeNumber: null,
-        session: null,
+        committeeNumber: committeeNumber || null,
+        session: session || null,
         photoUrl: profileImage || null,
         bio: description || null,
         skills: formattedSkills,
