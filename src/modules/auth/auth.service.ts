@@ -1,11 +1,11 @@
 import { db } from '../../config/db';
-import { executives, users, committeeSubmissions } from '../../db/schema';
+import { executives, users, committeeSubmissions, positions } from '../../db/schema';
 import { and, eq, inArray, desc, or } from 'drizzle-orm';
 import { hashPassword, comparePassword } from '../../utils/hash';
 import { generateToken } from '../../utils/jwt';
 import { HTTPException } from 'hono/http-exception';
 import type { Context } from 'hono';
-import { showActive } from '../committee/committee.service';
+import { showActive, mapDesignationToRole } from '../committee/committee.service';
 import { invalidate } from '../../utils/cache';
 import { sendPasswordResetEmail } from '../../utils/email';
 import jwt from 'jsonwebtoken';
@@ -143,6 +143,35 @@ export const registerUser = async (
         facebookUrl: facebookUrl || null,
         status: 'approved',
       });
+    }
+
+    const effectiveDesig = designation || existingSub?.designation;
+    const effectiveComm = committeeNumber !== undefined ? committeeNumber : existingSub?.committeeNumber;
+    if (effectiveDesig && effectiveComm) {
+      const dbRole = mapDesignationToRole(effectiveDesig);
+      const dbPos = effectiveDesig.toLowerCase().trim();
+      const [posExists] = await db.select().from(positions).where(eq(positions.position, dbPos));
+      if (!posExists) {
+        await db.insert(positions).values({ position: dbPos, description: effectiveDesig });
+      }
+      const [execExists] = await db
+        .select()
+        .from(executives)
+        .where(and(eq(executives.id, id), eq(executives.number, effectiveComm)));
+      if (execExists) {
+        await db
+          .update(executives)
+          .set({ role: dbRole, position: dbPos })
+          .where(and(eq(executives.id, id), eq(executives.number, effectiveComm)));
+      } else {
+        await db.insert(executives).values({
+          id,
+          number: effectiveComm,
+          role: dbRole,
+          position: dbPos,
+          assignedBy: 'MMU',
+        });
+      }
     }
   } catch (err) {
     console.warn('Could not store member submission metadata:', err);
@@ -485,8 +514,37 @@ export const updateUser = async (data: UpdateUserInput, c: Context) => {
       githubUrl: updatedUser.githubUrl || null,
       linkedinUrl: updatedUser.linkedinUrl || null,
       facebookUrl: updatedUser.facebookUrl || null,
-      status: 'pending',
+      status: 'approved',
     });
+  }
+
+  const effectiveDesig = designation !== undefined ? designation : existingSub?.designation;
+  const effectiveComm = committeeNumber !== undefined ? committeeNumber : existingSub?.committeeNumber;
+  if (effectiveDesig && effectiveComm) {
+    const dbRole = mapDesignationToRole(effectiveDesig);
+    const dbPos = effectiveDesig.toLowerCase().trim();
+    const [posRow] = await db.select().from(positions).where(eq(positions.position, dbPos));
+    if (!posRow) {
+      await db.insert(positions).values({ position: dbPos, description: effectiveDesig });
+    }
+    const [existingExec] = await db
+      .select()
+      .from(executives)
+      .where(and(eq(executives.id, user.id), eq(executives.number, effectiveComm)));
+    if (existingExec) {
+      await db
+        .update(executives)
+        .set({ role: dbRole, position: dbPos })
+        .where(and(eq(executives.id, user.id), eq(executives.number, effectiveComm)));
+    } else {
+      await db.insert(executives).values({
+        id: user.id,
+        number: effectiveComm,
+        role: dbRole,
+        position: dbPos,
+        assignedBy: 'MMU',
+      });
+    }
   }
 
   invalidateUserCaches();

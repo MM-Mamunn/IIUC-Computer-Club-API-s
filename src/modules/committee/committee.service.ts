@@ -1,7 +1,7 @@
 // committee.service.ts
 import type { Context } from 'hono';
 import { db } from '../../config/db';
-import { committee, executives, users, committeeSubmissions } from '../../db/schema';
+import { committee, executives, users, committeeSubmissions, positions } from '../../db/schema';
 import { HTTPException } from 'hono/http-exception';
 import { and, eq, isNull, isNotNull, desc, or, ne } from 'drizzle-orm';
 import { cached, invalidate } from '../../utils/cache';
@@ -321,7 +321,7 @@ export const showMembers = async (number: string) => {
         email: sub?.email || em.email,
         gender: em.gender || com.gender || 'male',
         profileImage: sub?.photoUrl || em.profileImage || null,
-        role: em.role || (sub?.designation ? mapDesignationToRole(sub.designation) : 'executive member'),
+        role: sub?.designation ? mapDesignationToRole(sub.designation) : (em.role || 'executive member'),
         position: sub?.designation || em.position || em.role || 'Executive Member',
         bio: sub?.bio || em.bio || null,
         githubUrl: sub?.githubUrl || em.githubUrl || null,
@@ -470,6 +470,58 @@ export const submitCommitteeApplication = async (data: CommitteeSubmissionInput)
     .where(eq(committeeSubmissions.matrixId, matrixId))
     .limit(1);
 
+  // Check if a registered user exists for this matrixId or email
+  const [existingUser] = await db
+    .select()
+    .from(users)
+    .where(or(eq(users.id, matrixId), eq(users.email, email)))
+    .limit(1);
+
+  if (existingUser) {
+    await db
+      .update(users)
+      .set({
+        name,
+        profileImage: photoUrl ?? existingUser.profileImage,
+        description: data.bio?.trim() || existingUser.description,
+        githubUrl: data.githubUrl?.trim() || existingUser.githubUrl,
+        linkedinUrl: data.linkedinUrl?.trim() || existingUser.linkedinUrl,
+        facebookUrl: data.facebookUrl?.trim() || existingUser.facebookUrl,
+        twitterUrl: (data.portfolioUrl?.trim() || data.twitterUrl?.trim()) || existingUser.twitterUrl,
+      })
+      .where(eq(users.id, existingUser.id));
+  }
+
+  // Synchronize with executives table
+  if (commNumber) {
+    const dbRole = mapDesignationToRole(designation);
+    const dbPos = designation.toLowerCase().trim();
+    const [posRow] = await db.select().from(positions).where(eq(positions.position, dbPos));
+    if (!posRow) {
+      await db.insert(positions).values({ position: dbPos, description: designation });
+    }
+    const [existingExec] = await db
+      .select()
+      .from(executives)
+      .where(and(eq(executives.id, matrixId), eq(executives.number, commNumber)));
+    if (existingExec) {
+      await db
+        .update(executives)
+        .set({ role: dbRole, position: dbPos })
+        .where(and(eq(executives.id, matrixId), eq(executives.number, commNumber)));
+    } else if (existingUser) {
+      await db.insert(executives).values({
+        id: matrixId,
+        number: commNumber,
+        role: dbRole,
+        position: dbPos,
+        assignedBy: 'MMU',
+      });
+    }
+  }
+
+  const effectiveStatus = existingUser ? 'approved' : 'pending';
+
   if (existing.length > 0) {
     const [updated] = await db
       .update(committeeSubmissions)
@@ -487,13 +539,15 @@ export const submitCommitteeApplication = async (data: CommitteeSubmissionInput)
         githubUrl: data.githubUrl?.trim() || null,
         linkedinUrl: data.linkedinUrl?.trim() || null,
         facebookUrl: data.facebookUrl?.trim() || null,
+        status: effectiveStatus,
         updatedAt: new Date(),
       })
       .where(eq(committeeSubmissions.id, existing[0].id))
       .returning();
 
     invalidate('dashboard:');
-    invalidate('committee:members:');
+    invalidate('users:');
+    invalidate('committee:');
     invalidate('president:');
 
     return {
@@ -520,12 +574,13 @@ export const submitCommitteeApplication = async (data: CommitteeSubmissionInput)
       githubUrl: data.githubUrl?.trim() || null,
       linkedinUrl: data.linkedinUrl?.trim() || null,
       facebookUrl: data.facebookUrl?.trim() || null,
-      status: 'pending',
+      status: effectiveStatus,
     })
     .returning();
 
   invalidate('dashboard:');
-  invalidate('committee:members:');
+  invalidate('users:');
+  invalidate('committee:');
   invalidate('president:');
 
   return {
