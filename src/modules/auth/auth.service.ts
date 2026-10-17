@@ -1,11 +1,11 @@
 import { db } from '../../config/db';
-import { executives, users, committeeSubmissions, committee } from '../../db/schema';
+import { executives, users, committeeSubmissions, committee, positions } from '../../db/schema';
 import { and, eq, inArray, desc, or } from 'drizzle-orm';
 import { hashPassword, comparePassword } from '../../utils/hash';
 import { generateToken } from '../../utils/jwt';
 import { HTTPException } from 'hono/http-exception';
 import type { Context } from 'hono';
-import { showActive } from '../committee/committee.service';
+import { showActive, mapDesignationToRole } from '../committee/committee.service';
 import { invalidate } from '../../utils/cache';
 import { sendPasswordResetEmail } from '../../utils/email';
 import jwt from 'jsonwebtoken';
@@ -302,8 +302,10 @@ export const saveImage = async (imageUrl: string, c: Context) => {
 
 // Invalidate committee member caches after profile data changes
 function invalidateUserCaches() {
-  invalidate('committee:members:');
+  invalidate('committee:');
   invalidate('president:');
+  invalidate('users:');
+  invalidate('dashboard:');
 }
 
 export const showMe = async (c: Context) => {
@@ -352,11 +354,26 @@ export const showMe = async (c: Context) => {
       session: committee.session,
       position: executives.position,
       role: executives.role,
+      designation: committeeSubmissions.designation,
     })
     .from(executives)
     .innerJoin(committee, eq(executives.number, committee.number))
+    .leftJoin(
+      committeeSubmissions,
+      and(
+        eq(committeeSubmissions.matrixId, executives.id),
+        eq(committeeSubmissions.committeeNumber, executives.number),
+      ),
+    )
     .where(eq(executives.id, user.id))
     .orderBy(desc(committee.start));
+
+  const formattedTenures = tenures.map((t) => ({
+    committeeNumber: t.committeeNumber,
+    session: t.session,
+    position: t.designation || t.position,
+    role: t.role,
+  }));
 
   let skillsList: string[] = [];
   if (submission?.skills) {
@@ -372,11 +389,11 @@ export const showMe = async (c: Context) => {
     ...me,
     batch: me.batch || submission?.batch || null,
     skills: skillsList,
-    designation: submission?.designation || null,
-    committeeNumber: submission?.committeeNumber || null,
-    session: submission?.session || null,
+    designation: submission?.designation || formattedTenures[0]?.position || null,
+    committeeNumber: submission?.committeeNumber || formattedTenures[0]?.committeeNumber || null,
+    session: submission?.session || formattedTenures[0]?.session || null,
     portfolioUrl: submission?.portfolioUrl || me.twitterUrl || null,
-    tenures,
+    tenures: formattedTenures,
   };
 };
 
@@ -414,6 +431,10 @@ export const updateUser = async (data: UpdateUserInput, c: Context) => {
   // remove undefined fields for users table
   const updateData = Object.fromEntries(Object.entries(userFields).filter(([, v]) => v !== undefined));
 
+  if (batch !== undefined) {
+    updateData.batch = batch;
+  }
+
   if (updateData.password) {
     throw new HTTPException(400, { message: "Can't change password through this endpoint" });
   }
@@ -436,6 +457,7 @@ export const updateUser = async (data: UpdateUserInput, c: Context) => {
         linkedinUrl: users.linkedinUrl,
         facebookUrl: users.facebookUrl,
         twitterUrl: users.twitterUrl,
+        batch: users.batch,
         createdAt: users.createdAt,
       });
     updatedUser = res;
@@ -504,6 +526,42 @@ export const updateUser = async (data: UpdateUserInput, c: Context) => {
     });
   }
 
+  // Sync with executives table so positions and roles are fully unified
+  const finalDesignation = designation !== undefined ? (designation || existingSub?.designation) : existingSub?.designation;
+  const targetCommNumber = committeeNumber !== undefined ? (committeeNumber || existingSub?.committeeNumber) : existingSub?.committeeNumber;
+
+  if (finalDesignation && targetCommNumber) {
+    const posKey = finalDesignation.toLowerCase().trim();
+    // Ensure position exists in positions table
+    await db
+      .insert(positions)
+      .values({
+        position: posKey,
+        description: finalDesignation.trim(),
+      })
+      .onConflictDoNothing();
+
+    const normalizedRole = mapDesignationToRole(finalDesignation);
+
+    // Upsert executives record so position and role are completely in sync
+    await db
+      .insert(executives)
+      .values({
+        id: user.id,
+        number: targetCommNumber,
+        role: normalizedRole,
+        position: posKey,
+        assignedBy: 'MMU',
+      })
+      .onConflictDoUpdate({
+        target: [executives.id, executives.number],
+        set: {
+          position: posKey,
+          role: normalizedRole,
+        },
+      });
+  }
+
   invalidateUserCaches();
 
   let finalSkills: string[] = [];
@@ -521,14 +579,38 @@ export const updateUser = async (data: UpdateUserInput, c: Context) => {
     }
   }
 
+  // Generate fresh token with updated role and position
+  const active = await showActive();
+  const activeNumbers = active.map((a) => a.number);
+  const [currentPos] = activeNumbers.length
+    ? await db
+        .select()
+        .from(executives)
+        .where(and(eq(executives.id, user.id), inArray(executives.number, activeNumbers)))
+    : [];
+
+  const tokenRole = currentPos?.role ?? 'student';
+  const tokenPosition = finalDesignation || currentPos?.position || '';
+  const tokenCommNumber = currentPos?.number ?? targetCommNumber ?? '';
+
+  const token = generateToken({
+    id: user.id,
+    role: tokenRole,
+    position: tokenPosition,
+    gender: updatedUser.gender,
+    committeeNumber: tokenCommNumber,
+    mustChangePassword: false,
+  });
+
   return {
     ...updatedUser,
-    batch: batch !== undefined ? batch : existingSub?.batch || null,
+    batch: batch !== undefined ? batch : updatedUser.batch || existingSub?.batch || null,
     skills: finalSkills,
-    designation: designation !== undefined ? designation : existingSub?.designation || null,
-    committeeNumber: committeeNumber !== undefined ? committeeNumber : existingSub?.committeeNumber || null,
+    designation: finalDesignation || null,
+    committeeNumber: targetCommNumber || null,
     session: session !== undefined ? session : existingSub?.session || null,
     portfolioUrl: portfolioUrl || updatedUser.twitterUrl || null,
+    token,
   };
 };
 

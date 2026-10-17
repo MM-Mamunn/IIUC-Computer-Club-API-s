@@ -106,22 +106,29 @@ export const getUserDirectory = async (params: {
 
     for (const e of execs) {
       const arr = execMap.get(e.id) || [];
-      arr.push({ role: e.role, position: e.position, committeeNumber: e.number });
+      const matchSub = subs.find(
+        (s) => s.matrixId.toUpperCase() === e.id.toUpperCase() && s.committeeNumber === e.number,
+      );
+      const displayPosition = matchSub?.designation || e.position;
+      arr.push({ role: e.role, position: displayPosition, committeeNumber: e.number });
       execMap.set(e.id, arr);
     }
 
     for (const s of subs) {
-      subMap.set(s.matrixId.toUpperCase(), s);
+      if (!subMap.has(s.matrixId.toUpperCase())) {
+        subMap.set(s.matrixId.toUpperCase(), s);
+      }
     }
   }
 
   const usersWithExecDetails = userResults.map((u) => {
     const s = subMap.get(u.id.toUpperCase());
+    const latestExec = execMap.get(u.id)?.[0];
     return {
       ...u,
-      batch: s?.batch || null,
+      batch: u.batch || s?.batch || null,
       skills: s?.skills || null,
-      designation: s?.designation || null,
+      designation: s?.designation || latestExec?.position || null,
       portfolioUrl: s?.portfolioUrl || u.twitterUrl || null,
       description: u.description || s?.bio || null,
       githubUrl: u.githubUrl || s?.githubUrl || null,

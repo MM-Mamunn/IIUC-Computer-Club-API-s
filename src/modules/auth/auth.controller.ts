@@ -136,6 +136,7 @@ export const updateUserController = async (c: Context) => {
       success: true,
       message: 'Profile updated',
       user,
+      token: (user as any).token,
     },
     200,
   );

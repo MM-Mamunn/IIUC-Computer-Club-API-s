@@ -1,11 +1,55 @@
 import { db } from '../../config/db';
-import { executives, users } from '../../db/schema';
+import { executives, users, committeeSubmissions } from '../../db/schema';
 import { eq, and, or } from 'drizzle-orm';
 import { HTTPException } from 'hono/http-exception';
 import type { Context } from 'hono';
 import { assertCommitteeOpen, getRolesByPriorityRange } from '../global/global.service';
 import { invalidate } from '../../utils/cache';
 import { log } from 'node:console';
+
+async function syncCommitteeSubmissionDesignation(id: string, number: string, designation: string) {
+  try {
+    const [userRecord] = await db.select().from(users).where(eq(users.id, id)).limit(1);
+    if (!userRecord) return;
+
+    const [existingSub] = await db
+      .select()
+      .from(committeeSubmissions)
+      .where(
+        and(
+          eq(committeeSubmissions.matrixId, id),
+          eq(committeeSubmissions.committeeNumber, number),
+        ),
+      )
+      .limit(1);
+
+    if (existingSub) {
+      await db
+        .update(committeeSubmissions)
+        .set({
+          designation,
+          name: userRecord.name,
+          email: userRecord.email,
+          updatedAt: new Date(),
+        })
+        .where(eq(committeeSubmissions.id, existingSub.id));
+    } else {
+      await db.insert(committeeSubmissions).values({
+        matrixId: id,
+        committeeNumber: number,
+        designation,
+        name: userRecord.name,
+        email: userRecord.email,
+        batch: userRecord.batch || 'General',
+        photoUrl: userRecord.profileImage || null,
+        bio: userRecord.description || null,
+        status: 'approved',
+      });
+    }
+  } catch (err) {
+    console.warn('Could not sync committee submission designation:', err);
+  }
+}
 
 // FUNCTIONS TO ADD VICE PRESIDENT
 export const addVicePresident = async (id: string, role: string, number: string, c: Context) => {
@@ -50,7 +94,11 @@ export const addVicePresident = async (id: string, role: string, number: string,
       },
     })
     .returning();
-  invalidate('committee:members:');
+
+  await syncCommitteeSubmissionDesignation(id, number, 'Vice President');
+  invalidate('committee:');
+  invalidate('dashboard:');
+  invalidate('users:');
   invalidate('president:');
   return newVP;
 };
@@ -86,7 +134,11 @@ export const addTreasurer = async (id: string, number: string, c: Context) => {
       },
     })
     .returning();
-  invalidate('committee:members:');
+
+  await syncCommitteeSubmissionDesignation(id, number, 'Treasurer');
+  invalidate('committee:');
+  invalidate('dashboard:');
+  invalidate('users:');
   invalidate('president:');
   return newTrsr;
 };
@@ -123,7 +175,11 @@ export const addGeneralSecretary = async (id: string, number: string, c: Context
       },
     })
     .returning();
-  invalidate('committee:members:');
+
+  await syncCommitteeSubmissionDesignation(id, number, 'General Secretary');
+  invalidate('committee:');
+  invalidate('dashboard:');
+  invalidate('users:');
   invalidate('president:');
   return newGS;
 };
@@ -171,7 +227,11 @@ export const addAsstGeneralSecretary = async (
     })
     .returning();
   log('new AGS is', newAGS);
-  invalidate('committee:members:');
+
+  await syncCommitteeSubmissionDesignation(id, number, role);
+  invalidate('committee:');
+  invalidate('dashboard:');
+  invalidate('users:');
   invalidate('president:');
   return newAGS;
 };
@@ -262,7 +322,11 @@ export const addSecretaries = async (
       },
     })
     .returning();
-  invalidate('committee:members:');
+
+  await syncCommitteeSubmissionDesignation(id, number, position || role);
+  invalidate('committee:');
+  invalidate('dashboard:');
+  invalidate('users:');
   invalidate('president:');
   return newSec;
 };
@@ -311,7 +375,10 @@ export const addExecutiveMember = async (id: string, number: string, c: Context)
     })
     .returning();
 
-  invalidate('committee:members:');
+  await syncCommitteeSubmissionDesignation(id, number, 'Executive Member');
+  invalidate('committee:');
+  invalidate('dashboard:');
+  invalidate('users:');
   invalidate('president:');
 
   return newExecutive;
@@ -334,7 +401,13 @@ export const deleteMember = async (id: string, number: string, c: Context) => {
     .delete(executives)
     .where(and(eq(executives.id, id), eq(executives.number, number)));
 
-  invalidate('committee:members:');
+  await db
+    .delete(committeeSubmissions)
+    .where(and(eq(committeeSubmissions.matrixId, id), eq(committeeSubmissions.committeeNumber, number)));
+
+  invalidate('committee:');
+  invalidate('dashboard:');
+  invalidate('users:');
   invalidate('president:');
 
   return { success: true, message: 'Member deleted successfully' };
