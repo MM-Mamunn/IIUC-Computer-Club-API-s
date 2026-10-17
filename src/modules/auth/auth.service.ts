@@ -1,11 +1,11 @@
 import { db } from '../../config/db';
-import { executives, users, committeeSubmissions, positions } from '../../db/schema';
+import { executives, users, committeeSubmissions, committee } from '../../db/schema';
 import { and, eq, inArray, desc, or } from 'drizzle-orm';
 import { hashPassword, comparePassword } from '../../utils/hash';
 import { generateToken } from '../../utils/jwt';
 import { HTTPException } from 'hono/http-exception';
 import type { Context } from 'hono';
-import { showActive, mapDesignationToRole } from '../committee/committee.service';
+import { showActive } from '../committee/committee.service';
 import { invalidate } from '../../utils/cache';
 import { sendPasswordResetEmail } from '../../utils/email';
 import jwt from 'jsonwebtoken';
@@ -84,6 +84,7 @@ export const registerUser = async (
       linkedinUrl: linkedinUrl || null,
       facebookUrl: facebookUrl || null,
       twitterUrl: twitterUrl || null,
+      batch: batch || null,
     })
     .returning();
 
@@ -144,42 +145,12 @@ export const registerUser = async (
         status: 'approved',
       });
     }
-
-    const effectiveDesig = designation || existingSub?.designation;
-    const effectiveComm = committeeNumber !== undefined ? committeeNumber : existingSub?.committeeNumber;
-    if (effectiveDesig && effectiveComm) {
-      const dbRole = mapDesignationToRole(effectiveDesig);
-      const dbPos = effectiveDesig.toLowerCase().trim();
-      const [posExists] = await db.select().from(positions).where(eq(positions.position, dbPos));
-      if (!posExists) {
-        await db.insert(positions).values({ position: dbPos, description: effectiveDesig });
-      }
-      const [execExists] = await db
-        .select()
-        .from(executives)
-        .where(and(eq(executives.id, id), eq(executives.number, effectiveComm)));
-      if (execExists) {
-        await db
-          .update(executives)
-          .set({ role: dbRole, position: dbPos })
-          .where(and(eq(executives.id, id), eq(executives.number, effectiveComm)));
-      } else {
-        await db.insert(executives).values({
-          id,
-          number: effectiveComm,
-          role: dbRole,
-          position: dbPos,
-          assignedBy: 'MMU',
-        });
-      }
-    }
   } catch (err) {
     console.warn('Could not store member submission metadata:', err);
   }
 
   invalidate('dashboard:');
   invalidate('users:');
-  invalidate('committee:');
 
   const token = await loginUser(id, password);
   return { token };
@@ -356,6 +327,7 @@ export const showMe = async (c: Context) => {
       linkedinUrl: users.linkedinUrl,
       facebookUrl: users.facebookUrl,
       twitterUrl: users.twitterUrl,
+      batch: users.batch,
       createdAt: users.createdAt,
     })
     .from(users)
@@ -373,6 +345,19 @@ export const showMe = async (c: Context) => {
     .orderBy(desc(committeeSubmissions.id))
     .limit(1);
 
+  // Query all historical and present committee tenures for this user
+  const tenures = await db
+    .select({
+      committeeNumber: executives.number,
+      session: committee.session,
+      position: executives.position,
+      role: executives.role,
+    })
+    .from(executives)
+    .innerJoin(committee, eq(executives.number, committee.number))
+    .where(eq(executives.id, user.id))
+    .orderBy(desc(committee.start));
+
   let skillsList: string[] = [];
   if (submission?.skills) {
     try {
@@ -385,12 +370,13 @@ export const showMe = async (c: Context) => {
 
   return {
     ...me,
-    batch: submission?.batch || null,
+    batch: me.batch || submission?.batch || null,
     skills: skillsList,
     designation: submission?.designation || null,
     committeeNumber: submission?.committeeNumber || null,
     session: submission?.session || null,
     portfolioUrl: submission?.portfolioUrl || me.twitterUrl || null,
+    tenures,
   };
 };
 
@@ -514,37 +500,8 @@ export const updateUser = async (data: UpdateUserInput, c: Context) => {
       githubUrl: updatedUser.githubUrl || null,
       linkedinUrl: updatedUser.linkedinUrl || null,
       facebookUrl: updatedUser.facebookUrl || null,
-      status: 'approved',
+      status: 'pending',
     });
-  }
-
-  const effectiveDesig = designation !== undefined ? designation : existingSub?.designation;
-  const effectiveComm = committeeNumber !== undefined ? committeeNumber : existingSub?.committeeNumber;
-  if (effectiveDesig && effectiveComm) {
-    const dbRole = mapDesignationToRole(effectiveDesig);
-    const dbPos = effectiveDesig.toLowerCase().trim();
-    const [posRow] = await db.select().from(positions).where(eq(positions.position, dbPos));
-    if (!posRow) {
-      await db.insert(positions).values({ position: dbPos, description: effectiveDesig });
-    }
-    const [existingExec] = await db
-      .select()
-      .from(executives)
-      .where(and(eq(executives.id, user.id), eq(executives.number, effectiveComm)));
-    if (existingExec) {
-      await db
-        .update(executives)
-        .set({ role: dbRole, position: dbPos })
-        .where(and(eq(executives.id, user.id), eq(executives.number, effectiveComm)));
-    } else {
-      await db.insert(executives).values({
-        id: user.id,
-        number: effectiveComm,
-        role: dbRole,
-        position: dbPos,
-        assignedBy: 'MMU',
-      });
-    }
   }
 
   invalidateUserCaches();

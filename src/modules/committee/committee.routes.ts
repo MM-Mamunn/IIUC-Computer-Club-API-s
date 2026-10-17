@@ -16,7 +16,8 @@ import {
   presidentAllOverviews,
 } from './president-overview.controller';
 import { requireRole } from '../../middlewares/role.middleware';
-import { authMiddleware } from '../../middlewares/auth.middleware';
+import { authMiddleware, optionalAuthMiddleware } from '../../middlewares/auth.middleware';
+import { rateLimiter } from '../../middlewares/rate-limit.middleware';
 import { getRolesByPriorityRange } from '../global/global.service';
 
 const router = new Hono();
@@ -27,8 +28,13 @@ router.get('/active', activeCommittees);
 
 router.get('/all', allCommittees);
 
-// ─── Authenticated Committee Member Applications ───
-router.post('/submission', authMiddleware, createSubmission);
+// ─── Public/Authenticated Committee Member Applications ───
+router.post(
+  '/submission',
+  rateLimiter({ windowMs: 15 * 60 * 1000, max: 30, keyPrefix: 'committee-sub' }),
+  optionalAuthMiddleware,
+  createSubmission,
+);
 router.get('/submission/:matrixId', authMiddleware, getSubmission);
 router.get('/submissions', authMiddleware, listSubmissions);
 

@@ -9,6 +9,7 @@ import {
   integer,
   boolean,
   serial,
+  unique,
 } from 'drizzle-orm/pg-core';
 
 /* =========================
@@ -41,6 +42,8 @@ export const committee = pgTable('committee', {
 
   end: date('end'),
 
+  isActive: boolean('is_active').notNull().default(true),
+
   beginningBudget: doublePrecision('beginning_budget'),
 
   description: text('description'),
@@ -65,6 +68,8 @@ export const users = pgTable('users', {
   idCard: text('id_card'),
 
   department: varchar('department', { length: 100 }),
+
+  batch: varchar('batch', { length: 50 }),
 
   githubUrl: text('github_url'),
   linkedinUrl: text('linkedin_url'),
@@ -147,5 +152,7 @@ export const committeeSubmissions = pgTable('committee_submissions', {
   status: varchar('status', { length: 50 }).notNull().default('pending'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-});
+}, (table) => ({
+  uqSubMatrixComm: unique('uq_sub_matrix_comm').on(table.matrixId, table.committeeNumber),
+}));
 

@@ -36,3 +36,22 @@ export const authMiddleware = async (c: Context, next: Next) => {
   }
 };
 
+export const optionalAuthMiddleware = async (c: Context, next: Next) => {
+  const authHeader = c.req.header("Authorization");
+  if (!authHeader) {
+    return next();
+  }
+
+  const parts = authHeader.split(" ");
+  if (parts.length === 2 && parts[0].toLowerCase() === "bearer") {
+    try {
+      const decoded = verifyToken(parts[1]);
+      c.set("user", decoded);
+    } catch {
+      // Ignore invalid token for optional auth
+    }
+  }
+
+  return next();
+};
+

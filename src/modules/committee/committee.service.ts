@@ -1,9 +1,9 @@
 // committee.service.ts
 import type { Context } from 'hono';
 import { db } from '../../config/db';
-import { committee, executives, users, committeeSubmissions, positions } from '../../db/schema';
+import { committee, executives, users, committeeSubmissions, roles } from '../../db/schema';
 import { HTTPException } from 'hono/http-exception';
-import { and, eq, isNull, isNotNull, desc, or, ne } from 'drizzle-orm';
+import { and, eq, isNull, isNotNull, desc, or, asc } from 'drizzle-orm';
 import { cached, invalidate } from '../../utils/cache';
 import { uploadImageToCloudinary } from '../../utils/uploadImage';
 
@@ -215,26 +215,7 @@ export const closeCommittee = async (number: string, endDate: string, userId?: s
   return updated;
 };
 
-export function mapDesignationToRole(designation: string): string {
-  const d = designation.toLowerCase().trim();
-  if (d === 'president') return 'president';
-  if (d.includes('vice president 1') || d.includes('vice president-1')) return 'vice president 1';
-  if (d.includes('vice president 2') || d.includes('vice president-2')) return 'vice president 2';
-  if (d.includes('vice president 3') || d.includes('vice president-3')) return 'vice president 3';
-  if (d.includes('vice president 4') || d.includes('vice president-4')) return 'vice president 4';
-  if (d.includes('vice president')) return 'vice president';
-  if (d.includes('treasurer')) return 'treasurer';
-  if (d.includes('assistant general secretary 1') || d.includes('assistant general secretary-1')) return 'assistant general secretary 1';
-  if (d.includes('assistant general secretary 2') || d.includes('assistant general secretary-2')) return 'assistant general secretary 2';
-  if (d.includes('assistant general secretary 3') || d.includes('assistant general secretary-3')) return 'assistant general secretary 3';
-  if (d.includes('assistant general secretary')) return 'assistant general secretary 1';
-  if (d.includes('general secretary')) return 'general secretary';
-  if (d.includes('assistant') && d.includes('secretary')) return 'assistant secretary';
-  if (d.includes('secretary')) return 'secretary';
-  return 'executive member';
-}
-
-// ─── Show Committee Members (cached 15s) ───
+// ─── Show Committee Members (cached 60s) ───
 export const showMembers = async (number: string) => {
   const [com] = await db.select().from(committee).where(eq(committee.number, number));
 
@@ -242,9 +223,8 @@ export const showMembers = async (number: string) => {
     throw new HTTPException(404, { message: 'Committee not found' });
   }
 
-  return cached(`committee:members:${number}`, 15_000, async () => {
-    // 1. Fetch executives joined with users
-    const execMembers = await db
+  return cached(`committee:members:${number}`, 60_000, async () => {
+    const rows = await db
       .select({
         id: executives.id,
         name: users.name,
@@ -253,126 +233,63 @@ export const showMembers = async (number: string) => {
         profileImage: users.profileImage,
         role: executives.role,
         position: executives.position,
-        bio: users.description,
+        userBio: users.description,
+        userBatch: users.batch,
+        subBatch: committeeSubmissions.batch,
+        subBio: committeeSubmissions.bio,
+        subSkills: committeeSubmissions.skills,
+        portfolioUrl: committeeSubmissions.portfolioUrl,
         githubUrl: users.githubUrl,
         linkedinUrl: users.linkedinUrl,
         facebookUrl: users.facebookUrl,
         twitterUrl: users.twitterUrl,
         department: users.department,
+        rolePriority: roles.priority,
       })
       .from(executives)
       .innerJoin(users, eq(executives.id, users.id))
-      .where(eq(executives.number, number));
-
-    // 2. Fetch committee submissions for this committee (pending or approved)
-    const submissions = await db
-      .select()
-      .from(committeeSubmissions)
-      .where(
+      .leftJoin(
+        committeeSubmissions,
         and(
-          eq(committeeSubmissions.committeeNumber, number),
-          ne(committeeSubmissions.status, 'rejected'),
+          eq(committeeSubmissions.matrixId, executives.id),
+          eq(committeeSubmissions.committeeNumber, executives.number),
         ),
-      );
+      )
+      .leftJoin(roles, eq(executives.role, roles.role))
+      .where(eq(executives.number, number))
+      .orderBy(asc(roles.priority), asc(users.name));
 
-    const subMap = new Map<string, (typeof submissions)[0]>();
-    for (const sub of submissions) {
-      if (sub.matrixId) {
-        subMap.set(sub.matrixId.toUpperCase(), sub);
-      }
-    }
-
-    interface FormattedMember {
-      id: string;
-      name: string;
-      email: string | null;
-      gender: string;
-      profileImage: string | null;
-      role: string | null;
-      position: string | null;
-      bio: string | null;
-      githubUrl: string | null;
-      linkedinUrl: string | null;
-      facebookUrl: string | null;
-      twitterUrl: string | null;
-      batch: string | null;
-      skills: string[] | null;
-      department: string | null;
-      portfolioUrl: string | null;
-      websiteUrl: string | null;
-    }
-
-    const memberMap = new Map<string, FormattedMember>();
-
-    for (const em of execMembers) {
-      const sub = subMap.get(em.id.toUpperCase());
-      let parsedSkills: string[] | null = null;
-      if (sub?.skills) {
+    return rows.map((r) => {
+      let parsedSkills: string[] = [];
+      if (r.subSkills) {
         try {
-          parsedSkills = JSON.parse(sub.skills);
+          const s = JSON.parse(r.subSkills);
+          parsedSkills = Array.isArray(s) ? s : [r.subSkills];
         } catch {
-          parsedSkills = sub.skills ? sub.skills.split(',').map((s) => s.trim()) : null;
+          parsedSkills = r.subSkills.split(',').map((x) => x.trim()).filter(Boolean);
         }
       }
 
-      memberMap.set(em.id.toUpperCase(), {
-        id: em.id,
-        name: sub?.name || em.name,
-        email: sub?.email || em.email,
-        gender: em.gender || com.gender || 'male',
-        profileImage: sub?.photoUrl || em.profileImage || null,
-        role: sub?.designation ? mapDesignationToRole(sub.designation) : (em.role || 'executive member'),
-        position: sub?.designation || em.position || em.role || 'Executive Member',
-        bio: sub?.bio || em.bio || null,
-        githubUrl: sub?.githubUrl || em.githubUrl || null,
-        linkedinUrl: sub?.linkedinUrl || em.linkedinUrl || null,
-        facebookUrl: sub?.facebookUrl || em.facebookUrl || null,
-        twitterUrl: em.twitterUrl || null,
-        batch: sub?.batch || null,
+      return {
+        id: r.id,
+        name: r.name,
+        email: r.email,
+        gender: r.gender,
+        profileImage: r.profileImage,
+        role: r.role,
+        position: r.position,
+        batch: r.subBatch || r.userBatch || null,
+        bio: r.subBio || r.userBio || null,
+        githubUrl: r.githubUrl,
+        linkedinUrl: r.linkedinUrl,
+        facebookUrl: r.facebookUrl,
+        twitterUrl: r.twitterUrl,
+        portfolioUrl: r.portfolioUrl || r.twitterUrl || null,
+        department: r.department || 'Dept. of CSE',
         skills: parsedSkills,
-        department: em.department || 'Dept. of CSE',
-        portfolioUrl: sub?.portfolioUrl || em.twitterUrl || null,
-        websiteUrl: sub?.portfolioUrl || em.twitterUrl || null,
-      });
-    }
-
-    // Include any submissions not already in executives
-    for (const sub of submissions) {
-      const idKey = sub.matrixId.toUpperCase();
-      if (!memberMap.has(idKey)) {
-        const [u] = await db.select().from(users).where(eq(users.id, sub.matrixId)).limit(1);
-        let parsedSkills: string[] | null = null;
-        if (sub.skills) {
-          try {
-            parsedSkills = JSON.parse(sub.skills);
-          } catch {
-            parsedSkills = sub.skills ? sub.skills.split(',').map((s) => s.trim()) : null;
-          }
-        }
-
-        memberMap.set(idKey, {
-          id: sub.matrixId,
-          name: sub.name,
-          email: sub.email,
-          gender: u?.gender || com.gender || 'male',
-          profileImage: sub.photoUrl || u?.profileImage || null,
-          role: mapDesignationToRole(sub.designation),
-          position: sub.designation,
-          bio: sub.bio || u?.description || null,
-          githubUrl: sub.githubUrl || u?.githubUrl || null,
-          linkedinUrl: sub.linkedinUrl || u?.linkedinUrl || null,
-          facebookUrl: sub.facebookUrl || u?.facebookUrl || null,
-          twitterUrl: sub.portfolioUrl || u?.twitterUrl || null,
-          batch: sub.batch,
-          skills: parsedSkills,
-          department: u?.department || 'Dept. of CSE',
-          portfolioUrl: sub.portfolioUrl || null,
-          websiteUrl: sub.portfolioUrl || null,
-        });
-      }
-    }
-
-    return Array.from(memberMap.values());
+        committeeNumber: number,
+      };
+    });
   });
 };
 
@@ -384,15 +301,43 @@ export interface CommitteeSubmissionInput {
   matrixId: string;
   batch: string;
   email: string;
+  password?: string;
+  gender?: 'male' | 'female' | null;
+  department?: string | null;
   committeeNumber?: string | null;
   session?: string | null;
   photo?: File | string | null;
+  photoUrl?: string | null;
   bio?: string | null;
-  skills?: string | null;
+  skills?: string | string[] | null;
   portfolioUrl?: string | null;
   githubUrl?: string | null;
   linkedinUrl?: string | null;
   facebookUrl?: string | null;
+  twitterUrl?: string | null;
+}
+
+export function mapDesignationToRole(designation: string): string {
+  if (!designation) return 'executive member';
+  const r = designation.toLowerCase().trim();
+  if (r === 'president') return 'president';
+  if (r.includes('vice president 1') || r.includes('vice-president 1') || r.includes('vp 1') || r.includes('vp-1')) return 'vice president 1';
+  if (r.includes('vice president 2') || r.includes('vice-president 2') || r.includes('vp 2') || r.includes('vp-2')) return 'vice president 2';
+  if (r.includes('vice president 3') || r.includes('vice-president 3') || r.includes('vp 3') || r.includes('vp-3')) return 'vice president 3';
+  if (r.includes('vice president 4') || r.includes('vice-president 4') || r.includes('vp 4') || r.includes('vp-4')) return 'vice president 4';
+  if (r.includes('vice president') || r.includes('vice-president') || r.includes('vp')) return 'vice president 1';
+  if (r.includes('general secretary') && !r.includes('assistant')) return 'general secretary';
+  if (r.includes('treasurer')) return 'treasurer';
+  if (r.includes('assistant general secretary 1') || r.includes('ags 1') || r.includes('ags-1')) return 'assistant general secretary 1';
+  if (r.includes('assistant general secretary 2') || r.includes('ags 2') || r.includes('ags-2')) return 'assistant general secretary 2';
+  if (r.includes('assistant general secretary 3') || r.includes('ags 3') || r.includes('ags-3')) return 'assistant general secretary 3';
+  if (r.includes('assistant general secretary') || r.includes('ags')) return 'assistant general secretary 1';
+  if (r.includes('assistant secretary 1') || r.includes('assistant office secretary')) return 'assistant secretary 1';
+  if (r.includes('assistant secretary 2')) return 'assistant secretary 2';
+  if (r.includes('assistant secretary 3')) return 'assistant secretary 3';
+  if (r.includes('assistant') && r.includes('secretary')) return 'assistant secretary 1';
+  if (r.includes('secretary')) return 'secretary';
+  return 'executive member';
 }
 
 export const submitCommitteeApplication = async (data: CommitteeSubmissionInput) => {
@@ -402,11 +347,12 @@ export const submitCommitteeApplication = async (data: CommitteeSubmissionInput)
   const batch = data.batch?.trim();
   const email = data.email?.trim().toLowerCase();
 
+  // a. Validate input
   if (!name) {
     throw new HTTPException(400, { message: 'Full Name is required' });
   }
   if (!designation) {
-    throw new HTTPException(400, { message: 'Designation role is required' });
+    throw new HTTPException(400, { message: 'Designation is required' });
   }
   if (!matrixId) {
     throw new HTTPException(400, { message: 'Matrix ID is required' });
@@ -414,46 +360,42 @@ export const submitCommitteeApplication = async (data: CommitteeSubmissionInput)
   if (!batch) {
     throw new HTTPException(400, { message: 'Batch selection is required' });
   }
-  if (!email) {
-    throw new HTTPException(400, { message: 'Student Email is required' });
-  }
-
-  // Strict IIUC Undergraduate email validation
-  if (!email.endsWith('@ugrad.iiuc.ac.bd')) {
+  if (!email || !email.endsWith('@ugrad.iiuc.ac.bd')) {
     throw new HTTPException(400, {
       message: 'Official IIUC student email required. Email must end with @ugrad.iiuc.ac.bd',
     });
   }
 
-  // Auto-resolve active committee number and session if not explicitly provided
-  let commNumber = data.committeeNumber?.trim() || null;
-  let commSession = data.session?.trim() || null;
-
-  if (!commNumber || !commSession) {
+  // Committee number resolution & validation
+  let commNumber = data.committeeNumber?.trim();
+  if (!commNumber) {
     const activeComms = await db
-      .select({ number: committee.number, session: committee.session, gender: committee.gender })
+      .select()
       .from(committee)
-      .where(isNull(committee.end))
-      .orderBy(desc(committee.start));
-
-    const latestComm =
-      activeComms[0] ||
-      (
-        await db
-          .select({ number: committee.number, session: committee.session, gender: committee.gender })
-          .from(committee)
-          .orderBy(desc(committee.start))
-          .limit(1)
-      )[0];
-
-    if (latestComm) {
-      if (!commNumber) commNumber = latestComm.number;
-      if (!commSession) commSession = latestComm.session;
-    }
+      .where(and(isNull(committee.end), eq(committee.isActive, true)))
+      .orderBy(desc(committee.start))
+      .limit(1);
+    commNumber = activeComms[0]?.number;
   }
 
-  // Handle photo upload if provided
-  let photoUrl: string | null = null;
+  if (!commNumber) {
+    throw new HTTPException(400, { message: 'Target Committee Number is required' });
+  }
+
+  const [targetComm] = await db
+    .select()
+    .from(committee)
+    .where(eq(committee.number, commNumber))
+    .limit(1);
+
+  if (!targetComm) {
+    throw new HTTPException(400, {
+      message: `Committee '${commNumber}' does not exist in the committee table.`,
+    });
+  }
+
+  // Handle photo upload
+  let photoUrl: string | null = data.photoUrl || null;
   if (data.photo && typeof data.photo === 'object' && 'arrayBuffer' in data.photo) {
     const file = data.photo as File;
     if (file.size > 0) {
@@ -463,131 +405,181 @@ export const submitCommitteeApplication = async (data: CommitteeSubmissionInput)
     photoUrl = data.photo.trim();
   }
 
-  // Check if an application already exists for this matrixId
-  const existing = await db
-    .select()
-    .from(committeeSubmissions)
-    .where(eq(committeeSubmissions.matrixId, matrixId))
-    .limit(1);
+  const autoApprove = (process.env.COMMITTEE_AUTO_APPROVE ?? 'true').toLowerCase() === 'true';
+  const effectiveStatus = autoApprove ? 'approved' : 'pending';
 
-  // Check if a registered user exists for this matrixId or email
-  const [existingUser] = await db
-    .select()
-    .from(users)
-    .where(or(eq(users.id, matrixId), eq(users.email, email)))
-    .limit(1);
-
-  if (existingUser) {
-    await db
-      .update(users)
-      .set({
-        name,
-        profileImage: photoUrl ?? existingUser.profileImage,
-        description: data.bio?.trim() || existingUser.description,
-        githubUrl: data.githubUrl?.trim() || existingUser.githubUrl,
-        linkedinUrl: data.linkedinUrl?.trim() || existingUser.linkedinUrl,
-        facebookUrl: data.facebookUrl?.trim() || existingUser.facebookUrl,
-        twitterUrl: (data.portfolioUrl?.trim() || data.twitterUrl?.trim()) || existingUser.twitterUrl,
-      })
-      .where(eq(users.id, existingUser.id));
-  }
-
-  // Synchronize with executives table
-  if (commNumber) {
-    const dbRole = mapDesignationToRole(designation);
-    const dbPos = designation.toLowerCase().trim();
-    const [posRow] = await db.select().from(positions).where(eq(positions.position, dbPos));
-    if (!posRow) {
-      await db.insert(positions).values({ position: dbPos, description: designation });
-    }
-    const [existingExec] = await db
+  // Run everything in ONE DB transaction
+  const result = await db.transaction(async (tx) => {
+    // b. Find user by matrixId OR email
+    const [userByMatrix] = await tx
       .select()
-      .from(executives)
-      .where(and(eq(executives.id, matrixId), eq(executives.number, commNumber)));
-    if (existingExec) {
-      await db
-        .update(executives)
-        .set({ role: dbRole, position: dbPos })
-        .where(and(eq(executives.id, matrixId), eq(executives.number, commNumber)));
-    } else if (existingUser) {
-      await db.insert(executives).values({
-        id: matrixId,
-        number: commNumber,
-        role: dbRole,
-        position: dbPos,
-        assignedBy: 'MMU',
+      .from(users)
+      .where(eq(users.id, matrixId))
+      .limit(1);
+
+    const [userByEmail] = await tx
+      .select()
+      .from(users)
+      .where(eq(users.email, email))
+      .limit(1);
+
+    // If matrixId and email match two different users, return 409
+    if (userByMatrix && userByEmail && userByMatrix.id !== userByEmail.id) {
+      throw new HTTPException(409, {
+        message: 'Conflict: Matrix ID and Student Email belong to two different registered accounts.',
       });
     }
-  }
 
-  const effectiveStatus = existingUser ? 'approved' : 'pending';
+    const existingUser = userByMatrix || userByEmail;
+    const targetUserId = existingUser ? existingUser.id : matrixId;
 
-  if (existing.length > 0) {
-    const [updated] = await db
-      .update(committeeSubmissions)
-      .set({
+    if (!existingUser) {
+      // New user: hash password and insert
+      const plainPassword = data.password?.trim() || matrixId;
+      const hashedPassword = await bcrypt.hash(plainPassword, 10);
+
+      await tx.insert(users).values({
+        id: matrixId,
+        name,
+        email,
+        password: hashedPassword,
+        gender: data.gender || targetComm.gender || 'male',
+        department: data.department?.trim() || 'Dept. of CSE',
+        batch,
+        profileImage: photoUrl || null,
+        description: data.bio?.trim() || null,
+        githubUrl: data.githubUrl?.trim() || null,
+        linkedinUrl: data.linkedinUrl?.trim() || null,
+        facebookUrl: data.facebookUrl?.trim() || null,
+        twitterUrl: data.portfolioUrl?.trim() || data.twitterUrl?.trim() || null,
+        mustChangePassword: false,
+      });
+    } else {
+      // Existing user: NEVER overwrite password. Update profile fields only.
+      await tx
+        .update(users)
+        .set({
+          name,
+          batch: batch || existingUser.batch,
+          profileImage: photoUrl || existingUser.profileImage,
+          description: data.bio?.trim() || existingUser.description,
+          githubUrl: data.githubUrl?.trim() || existingUser.githubUrl,
+          linkedinUrl: data.linkedinUrl?.trim() || existingUser.linkedinUrl,
+          facebookUrl: data.facebookUrl?.trim() || existingUser.facebookUrl,
+          twitterUrl: (data.portfolioUrl?.trim() || data.twitterUrl?.trim()) || existingUser.twitterUrl,
+        })
+        .where(eq(users.id, existingUser.id));
+    }
+
+    // Ensure position exists in positions table
+    const posKey = designation.toLowerCase().trim();
+    await tx
+      .insert(positions)
+      .values({
+        position: posKey,
+        description: designation,
+      })
+      .onConflictDoNothing();
+
+    const roleName = mapDesignationToRole(designation);
+
+    // c. Upsert executives (only approved submissions create or keep the executives row)
+    if (effectiveStatus === 'approved') {
+      await tx
+        .insert(executives)
+        .values({
+          id: targetUserId,
+          number: commNumber,
+          role: roleName,
+          position: posKey,
+          assignedBy: 'MMU',
+        })
+        .onConflictDoUpdate({
+          target: [executives.id, executives.number],
+          set: {
+            role: roleName,
+            position: posKey,
+          },
+        });
+    }
+
+    // d. Upsert committee_submissions on (matrixId, committeeNumber)
+    const formattedSkills = data.skills
+      ? Array.isArray(data.skills)
+        ? JSON.stringify(data.skills)
+        : data.skills
+      : null;
+
+    const [sub] = await tx
+      .insert(committeeSubmissions)
+      .values({
         name,
         designation,
+        matrixId: targetUserId,
         batch,
         email,
-        committeeNumber: commNumber ?? existing[0].committeeNumber,
-        session: commSession ?? existing[0].session,
-        photoUrl: photoUrl ?? existing[0].photoUrl,
-        bio: data.bio?.trim() || null,
-        skills: data.skills ? (typeof data.skills === 'string' ? data.skills : JSON.stringify(data.skills)) : null,
-        portfolioUrl: data.portfolioUrl?.trim() || null,
+        committeeNumber: commNumber,
+        session: targetComm.session || data.session || null,
+        photoUrl: photoUrl || (existingUser?.profileImage ?? null),
+        bio: data.bio?.trim() || (existingUser?.description ?? null),
+        skills: formattedSkills,
+        portfolioUrl: data.portfolioUrl?.trim() || data.twitterUrl?.trim() || null,
         githubUrl: data.githubUrl?.trim() || null,
         linkedinUrl: data.linkedinUrl?.trim() || null,
         facebookUrl: data.facebookUrl?.trim() || null,
         status: effectiveStatus,
-        updatedAt: new Date(),
       })
-      .where(eq(committeeSubmissions.id, existing[0].id))
+      .onConflictDoUpdate({
+        target: [committeeSubmissions.matrixId, committeeSubmissions.committeeNumber],
+        set: {
+          name,
+          designation,
+          batch,
+          email,
+          session: targetComm.session || data.session || null,
+          photoUrl: photoUrl || (existingUser?.profileImage ?? null),
+          bio: data.bio?.trim() || (existingUser?.description ?? null),
+          skills: formattedSkills,
+          portfolioUrl: data.portfolioUrl?.trim() || data.twitterUrl?.trim() || null,
+          githubUrl: data.githubUrl?.trim() || null,
+          linkedinUrl: data.linkedinUrl?.trim() || null,
+          facebookUrl: data.facebookUrl?.trim() || null,
+          status: effectiveStatus,
+          updatedAt: new Date(),
+        },
+      })
       .returning();
 
-    invalidate('dashboard:');
-    invalidate('users:');
-    invalidate('committee:');
-    invalidate('president:');
+    // Generate JWT token for auto-login
+    const token = generateToken({
+      id: targetUserId,
+      role: roleName,
+      position: posKey,
+      gender: data.gender || targetComm.gender || 'male',
+      committeeNumber: commNumber,
+      mustChangePassword: false,
+    });
 
     return {
-      submission: updated,
-      isUpdate: true,
-      message: 'Application updated successfully!',
-    };
-  }
-
-  const [created] = await db
-    .insert(committeeSubmissions)
-    .values({
-      name,
-      designation,
-      matrixId,
-      batch,
-      email,
-      committeeNumber: commNumber || null,
-      session: commSession || null,
-      photoUrl: photoUrl || null,
-      bio: data.bio?.trim() || null,
-      skills: data.skills ? (typeof data.skills === 'string' ? data.skills : JSON.stringify(data.skills)) : null,
-      portfolioUrl: data.portfolioUrl?.trim() || null,
-      githubUrl: data.githubUrl?.trim() || null,
-      linkedinUrl: data.linkedinUrl?.trim() || null,
-      facebookUrl: data.facebookUrl?.trim() || null,
+      submission: sub,
+      userId: targetUserId,
+      token,
       status: effectiveStatus,
-    })
-    .returning();
+      message: effectiveStatus === 'approved'
+        ? 'Application registered and approved successfully!'
+        : 'Application submitted and pending approval.',
+    };
+  });
 
-  invalidate('dashboard:');
-  invalidate('users:');
+  // e. After commit, invalidate caches
+  invalidate(`committee:members:${commNumber}`);
+  invalidate('committee:active');
+  invalidate('committee:all');
   invalidate('committee:');
-  invalidate('president:');
+  invalidate('users:');
+  invalidate('dashboard:');
 
-  return {
-    submission: created,
-    isUpdate: false,
-    message: 'Application submitted successfully!',
-  };
+  return result;
 };
 
 export const getCommitteeSubmissionByMatrixId = async (matrixId: string) => {
@@ -610,4 +602,5 @@ export const getAllCommitteeSubmissions = async () => {
     .from(committeeSubmissions)
     .orderBy(desc(committeeSubmissions.createdAt));
 };
+
 

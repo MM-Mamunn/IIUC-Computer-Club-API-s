@@ -4,7 +4,6 @@ import { roles as rolesTable } from '../../db/schema';
 import { events, eventRegistrations, eventExpenses, vouchers } from '../../db/event.schema';
 import { eq, and, ilike, or, count, isNull, sum, inArray, desc, type SQL } from 'drizzle-orm';
 import { cached } from '../../utils/cache';
-import { mapDesignationToRole } from '../committee/committee.service';
 
 // ─── User Directory ───
 export const getUserDirectory = async (params: {
@@ -118,28 +117,23 @@ export const getUserDirectory = async (params: {
 
   const usersWithExecDetails = userResults.map((u) => {
     const s = subMap.get(u.id.toUpperCase());
-    const userExecs = execMap.get(u.id);
     return {
       ...u,
       batch: s?.batch || null,
       skills: s?.skills || null,
-      designation: s?.designation || (userExecs && userExecs.length > 0 ? (userExecs[0].position || userExecs[0].role) : null),
+      designation: s?.designation || null,
       portfolioUrl: s?.portfolioUrl || u.twitterUrl || null,
       description: u.description || s?.bio || null,
       githubUrl: u.githubUrl || s?.githubUrl || null,
       linkedinUrl: u.linkedinUrl || s?.linkedinUrl || null,
       facebookUrl: u.facebookUrl || s?.facebookUrl || null,
       executives:
-        (userExecs && userExecs.length > 0)
-          ? userExecs.map((ex) => ({
-              ...ex,
-              position: (s?.committeeNumber === ex.committeeNumber && s?.designation) ? s.designation : (ex.position || ex.role),
-              role: (s?.committeeNumber === ex.committeeNumber && s?.designation) ? mapDesignationToRole(s.designation) : ex.role,
-            }))
+        (execMap.get(u.id) && execMap.get(u.id)!.length > 0)
+          ? execMap.get(u.id)!
           : s?.committeeNumber
           ? [
               {
-                role: mapDesignationToRole(s.designation || 'Member'),
+                role: s.designation || 'Member',
                 position: s.designation || 'Executive Member',
                 committeeNumber: s.committeeNumber,
               },

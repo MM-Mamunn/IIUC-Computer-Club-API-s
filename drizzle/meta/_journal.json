@@ -211,6 +211,13 @@
       "when": 1792167562629,
       "tag": "0029_smart_talos",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1792221145981,
+      "tag": "0030_nifty_blazing_skull",
+      "breakpoints": true
     }
   ]
 }
