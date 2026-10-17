@@ -233,6 +233,7 @@ export const showMembers = async (number: string) => {
         profileImage: users.profileImage,
         role: executives.role,
         position: executives.position,
+        subDesignation: committeeSubmissions.designation,
         userBio: users.description,
         userBatch: users.batch,
         subBatch: committeeSubmissions.batch,
@@ -270,6 +271,8 @@ export const showMembers = async (number: string) => {
         }
       }
 
+      const displayPosition = r.subDesignation || r.position;
+
       return {
         id: r.id,
         name: r.name,
@@ -277,7 +280,8 @@ export const showMembers = async (number: string) => {
         gender: r.gender,
         profileImage: r.profileImage,
         role: r.role,
-        position: r.position,
+        position: displayPosition,
+        designation: displayPosition,
         batch: r.subBatch || r.userBatch || null,
         bio: r.subBio || r.userBio || null,
         githubUrl: r.githubUrl,

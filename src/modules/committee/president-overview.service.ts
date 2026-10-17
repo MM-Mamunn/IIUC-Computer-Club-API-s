@@ -1,5 +1,5 @@
 import { db } from '../../config/db';
-import { committee, executives, users } from '../../db/schema';
+import { committee, executives, users, committeeSubmissions } from '../../db/schema';
 import {
   events,
   eventRegistrations,
@@ -160,7 +160,9 @@ export const getCommitteeOverview = async (committeeNumber: string, userId?: str
         profileImage: users.profileImage,
         role: executives.role,
         position: executives.position,
+        subDesignation: committeeSubmissions.designation,
         bio: users.description,
+        subBio: committeeSubmissions.bio,
         githubUrl: users.githubUrl,
         linkedinUrl: users.linkedinUrl,
         facebookUrl: users.facebookUrl,
@@ -168,6 +170,13 @@ export const getCommitteeOverview = async (committeeNumber: string, userId?: str
       })
       .from(executives)
       .innerJoin(users, eq(executives.id, users.id))
+      .leftJoin(
+        committeeSubmissions,
+        and(
+          eq(committeeSubmissions.matrixId, executives.id),
+          eq(committeeSubmissions.committeeNumber, executives.number),
+        ),
+      )
       .where(eq(executives.number, committeeNumber)),
   ]);
 
@@ -271,7 +280,12 @@ export const getCommitteeOverview = async (committeeNumber: string, userId?: str
       totalVerifiedPayments,
     },
     events: eventSummaries,
-    members,
+    members: members.map((m) => ({
+      ...m,
+      position: m.subDesignation || m.position,
+      designation: m.subDesignation || m.position,
+      bio: m.subBio || m.bio,
+    })),
   };
 };
 
@@ -416,10 +430,18 @@ export const getAllOverviews = (userId?: string) =>
           profileImage: users.profileImage,
           role: executives.role,
           position: executives.position,
+          subDesignation: committeeSubmissions.designation,
           committeeNumber: executives.number,
         })
         .from(executives)
         .innerJoin(users, eq(executives.id, users.id))
+        .leftJoin(
+          committeeSubmissions,
+          and(
+            eq(committeeSubmissions.matrixId, executives.id),
+            eq(committeeSubmissions.committeeNumber, executives.number),
+          ),
+        )
         .where(inArray(executives.number, allNumbers)),
     ]);
 
@@ -468,7 +490,11 @@ export const getAllOverviews = (userId?: string) =>
     return allCommittees.map((comm) => {
       const committeeEvents = eventsByCommittee.get(comm.number) ?? [];
       const members = (membersByCommittee.get(comm.number) ?? []).map(
-        ({ committeeNumber: _, ...rest }) => rest,
+        ({ committeeNumber: _, subDesignation, position, ...rest }) => ({
+          ...rest,
+          position: subDesignation || position,
+          designation: subDesignation || position,
+        }),
       );
 
       // Session budget: male uses own, female uses sibling male's
