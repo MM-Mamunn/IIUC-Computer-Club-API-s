@@ -1,11 +1,13 @@
 // committee.service.ts
 import type { Context } from 'hono';
 import { db } from '../../config/db';
-import { committee, executives, users, committeeSubmissions, roles } from '../../db/schema';
+import { committee, executives, users, committeeSubmissions, roles, positions } from '../../db/schema';
 import { HTTPException } from 'hono/http-exception';
 import { and, eq, isNull, isNotNull, desc, or, asc } from 'drizzle-orm';
 import { cached, invalidate } from '../../utils/cache';
 import { uploadImageToCloudinary } from '../../utils/uploadImage';
+import { hashPassword } from '../../utils/hash';
+import { generateToken } from '../../utils/jwt';
 
 export const addCommittee = async (
   number: string,
@@ -440,7 +442,7 @@ export const submitCommitteeApplication = async (data: CommitteeSubmissionInput)
     if (!existingUser) {
       // New user: hash password and insert
       const plainPassword = data.password?.trim() || matrixId;
-      const hashedPassword = await bcrypt.hash(plainPassword, 10);
+      const hashedPassword = await hashPassword(plainPassword);
 
       await tx.insert(users).values({
         id: matrixId,
