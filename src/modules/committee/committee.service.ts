@@ -314,10 +314,24 @@ export const showMembers = async (number: string) => {
     for (const t of allTenures) {
       let tenureDesignation = t.subDesignation || t.position || 'Member';
       const vpM =
-        (t.role || '').match(/vice\s*president\s*(\d+)/i) ||
-        (tenureDesignation || '').match(/vice\s*president\s*(\d+)/i);
+        (t.role || '').match(/(?:vice\s*president|vp)[-\s]*(\d+)/i) ||
+        (tenureDesignation || '').match(/(?:vice\s*president|vp)[-\s]*(\d+)/i);
       if (vpM) {
         tenureDesignation = `Vice President ${vpM[1]}`;
+      } else {
+        const agsM =
+          (t.role || '').match(/(?:assistant\s*general\s*secretary|ags)[-\s]*(\d+)/i) ||
+          (tenureDesignation || '').match(/(?:assistant\s*general\s*secretary|ags)[-\s]*(\d+)/i);
+        if (agsM) {
+          tenureDesignation = `Assistant General Secretary ${agsM[1]}`;
+        } else {
+          const asM =
+            (t.role || '').match(/(?:assistant\s*secretary|as)[-\s]*(\d+)/i) ||
+            (tenureDesignation || '').match(/(?:assistant\s*secretary|as)[-\s]*(\d+)/i);
+          if (asM) {
+            tenureDesignation = `Assistant Secretary ${asM[1]}`;
+          }
+        }
       }
       const arr = tenuresByMember.get(t.id) || [];
       arr.push({
@@ -332,21 +346,21 @@ export const showMembers = async (number: string) => {
     // Sort rows so President is 1, all Vice Presidents are 2.x, and Treasurer is ALWAYS at the end of Tier 2
     const getRoleRank = (role?: string | null, position?: string | null): number => {
       const text = `${role || ''} ${position || ''}`.toLowerCase();
-      if (text.includes('president') && !text.includes('vice')) return 1;
-      if (text.includes('vice president 1') || text.includes('vp 1') || text.includes('vp-1') || text.includes('vice-president 1')) return 2.1;
-      if (text.includes('vice president 2') || text.includes('vp 2') || text.includes('vp-2') || text.includes('vice-president 2')) return 2.2;
-      if (text.includes('vice president 3') || text.includes('vp 3') || text.includes('vp-3') || text.includes('vice-president 3')) return 2.3;
-      if (text.includes('vice president 4') || text.includes('vp 4') || text.includes('vp-4') || text.includes('vice-president 4')) return 2.4;
-      if (text.includes('vice president') || text.includes('vice-president')) return 2.5;
+      if (text.includes('president') && !text.includes('vice') && !text.includes('vp')) return 1;
+      if (/(?:vice\s*president|vp)[-\s]*1\b/i.test(text)) return 2.1;
+      if (/(?:vice\s*president|vp)[-\s]*2\b/i.test(text)) return 2.2;
+      if (/(?:vice\s*president|vp)[-\s]*3\b/i.test(text)) return 2.3;
+      if (/(?:vice\s*president|vp)[-\s]*4\b/i.test(text)) return 2.4;
+      if (text.includes('vice president') || text.includes('vice-president') || text.includes('vp')) return 2.5;
       if (text.includes('treasurer')) return 2.9; // Treasurer ALWAYS comes after all Vice Presidents!
-      if (text.includes('general secretary') && !text.includes('assistant')) return 3;
-      if (text.includes('assistant general secretary 1') || text.includes('ags 1')) return 4.1;
-      if (text.includes('assistant general secretary 2') || text.includes('ags 2')) return 4.2;
-      if (text.includes('assistant general secretary 3') || text.includes('ags 3')) return 4.3;
+      if (text.includes('general secretary') && !text.includes('assistant') && !text.includes('ags')) return 3;
+      if (/(?:assistant\s*general\s*secretary|ags)[-\s]*1\b/i.test(text)) return 4.1;
+      if (/(?:assistant\s*general\s*secretary|ags)[-\s]*2\b/i.test(text)) return 4.2;
+      if (/(?:assistant\s*general\s*secretary|ags)[-\s]*3\b/i.test(text)) return 4.3;
       if (text.includes('assistant general secretary') || text.includes('ags')) return 4.4;
-      if (text.includes('assistant secretary 1')) return 6.1;
-      if (text.includes('assistant secretary 2')) return 6.2;
-      if (text.includes('assistant secretary 3')) return 6.3;
+      if (/(?:assistant\s*secretary|as)[-\s]*1\b/i.test(text)) return 6.1;
+      if (/(?:assistant\s*secretary|as)[-\s]*2\b/i.test(text)) return 6.2;
+      if (/(?:assistant\s*secretary|as)[-\s]*3\b/i.test(text)) return 6.3;
       if (text.includes('assistant secretary')) return 6.4;
       if (text.includes('secretary')) return 5;
       return 7;
@@ -372,20 +386,20 @@ export const showMembers = async (number: string) => {
 
       let displayPosition = r.subDesignation || r.position;
       const vpMatch =
-        (r.role || '').match(/vice\s*president\s*(\d+)/i) ||
-        (displayPosition || '').match(/vice\s*president\s*(\d+)/i);
+        (r.role || '').match(/(?:vice\s*president|vp)[-\s]*(\d+)/i) ||
+        (displayPosition || '').match(/(?:vice\s*president|vp)[-\s]*(\d+)/i);
       if (vpMatch) {
         displayPosition = `Vice President ${vpMatch[1]}`;
       } else {
         const agsMatch =
-          (r.role || '').match(/assistant\s*general\s*secretary\s*(\d+)/i) ||
-          (displayPosition || '').match(/assistant\s*general\s*secretary\s*(\d+)/i);
+          (r.role || '').match(/(?:assistant\s*general\s*secretary|ags)[-\s]*(\d+)/i) ||
+          (displayPosition || '').match(/(?:assistant\s*general\s*secretary|ags)[-\s]*(\d+)/i);
         if (agsMatch) {
           displayPosition = `Assistant General Secretary ${agsMatch[1]}`;
         } else {
           const asMatch =
-            (r.role || '').match(/assistant\s*secretary\s*(\d+)/i) ||
-            (displayPosition || '').match(/assistant\s*secretary\s*(\d+)/i);
+            (r.role || '').match(/(?:assistant\s*secretary|as)[-\s]*(\d+)/i) ||
+            (displayPosition || '').match(/(?:assistant\s*secretary|as)[-\s]*(\d+)/i);
           if (asMatch) {
             displayPosition = `Assistant Secretary ${asMatch[1]}`;
           }

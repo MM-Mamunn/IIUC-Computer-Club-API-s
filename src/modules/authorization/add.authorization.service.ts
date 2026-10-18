@@ -227,9 +227,8 @@ export const addAsstGeneralSecretary = async (
       },
     })
     .returning();
-  log('new AGS is', newAGS);
-
-  await syncCommitteeSubmissionDesignation(id, number, role);
+  const agsTitle = role.replace(/\b\w/g, (ch) => ch.toUpperCase());
+  await syncCommitteeSubmissionDesignation(id, number, agsTitle);
   invalidate('committee:');
   invalidate('dashboard:');
   invalidate('users:');
