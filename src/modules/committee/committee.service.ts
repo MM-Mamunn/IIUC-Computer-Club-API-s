@@ -3,7 +3,7 @@ import type { Context } from 'hono';
 import { db } from '../../config/db';
 import { committee, executives, users, committeeSubmissions, roles, positions } from '../../db/schema';
 import { HTTPException } from 'hono/http-exception';
-import { and, eq, isNull, isNotNull, desc, or, asc } from 'drizzle-orm';
+import { and, eq, isNull, isNotNull, desc, or, asc, inArray } from 'drizzle-orm';
 import { cached, invalidate } from '../../utils/cache';
 import { uploadImageToCloudinary } from '../../utils/uploadImage';
 import { hashPassword } from '../../utils/hash';
@@ -262,6 +262,52 @@ export const showMembers = async (number: string) => {
       .where(eq(executives.number, number))
       .orderBy(asc(roles.priority), asc(users.name));
 
+    const memberIds = Array.from(new Set(rows.map((r) => r.id)));
+    const allTenures =
+      memberIds.length > 0
+        ? await db
+            .select({
+              id: executives.id,
+              committeeNumber: executives.number,
+              position: executives.position,
+              role: executives.role,
+              session: committee.session,
+              subDesignation: committeeSubmissions.designation,
+            })
+            .from(executives)
+            .innerJoin(committee, eq(executives.number, committee.number))
+            .leftJoin(
+              committeeSubmissions,
+              and(
+                eq(committeeSubmissions.matrixId, executives.id),
+                eq(committeeSubmissions.committeeNumber, executives.number),
+              ),
+            )
+            .where(inArray(executives.id, memberIds))
+            .orderBy(desc(committee.start))
+        : [];
+
+    const tenuresByMember = new Map<
+      string,
+      Array<{
+        committeeNumber: string;
+        session: string | null;
+        designation: string;
+        role: string | null;
+      }>
+    >();
+
+    for (const t of allTenures) {
+      const arr = tenuresByMember.get(t.id) || [];
+      arr.push({
+        committeeNumber: t.committeeNumber,
+        session: t.session,
+        designation: t.subDesignation || t.position || 'Member',
+        role: t.role,
+      });
+      tenuresByMember.set(t.id, arr);
+    }
+
     return rows.map((r) => {
       let parsedSkills: string[] = [];
       if (r.subSkills) {
@@ -294,6 +340,7 @@ export const showMembers = async (number: string) => {
         department: r.department || 'Dept. of CSE',
         skills: parsedSkills,
         committeeNumber: number,
+        history: tenuresByMember.get(r.id) || [],
       };
     });
   });

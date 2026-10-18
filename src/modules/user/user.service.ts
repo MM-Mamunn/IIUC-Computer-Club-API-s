@@ -110,7 +110,13 @@ export const getUserDirectory = async (params: {
         (s) => s.matrixId.toUpperCase() === e.id.toUpperCase() && s.committeeNumber === e.number,
       );
       const displayPosition = matchSub?.designation || e.position;
-      arr.push({ role: e.role, position: displayPosition, committeeNumber: e.number });
+      arr.push({
+        role: e.role,
+        position: displayPosition,
+        designation: displayPosition,
+        committeeNumber: e.number,
+        session: matchSub?.session || null,
+      });
       execMap.set(e.id, arr);
     }
 
@@ -124,6 +130,21 @@ export const getUserDirectory = async (params: {
   const usersWithExecDetails = userResults.map((u) => {
     const s = subMap.get(u.id.toUpperCase());
     const latestExec = execMap.get(u.id)?.[0];
+    const userExecs =
+      execMap.get(u.id) && execMap.get(u.id)!.length > 0
+        ? execMap.get(u.id)!
+        : s?.committeeNumber
+        ? [
+            {
+              role: s.designation || 'Member',
+              position: s.designation || 'Executive Member',
+              designation: s.designation || 'Executive Member',
+              committeeNumber: s.committeeNumber,
+              session: s.session || null,
+            },
+          ]
+        : [];
+
     return {
       ...u,
       batch: u.batch || s?.batch || null,
@@ -134,18 +155,8 @@ export const getUserDirectory = async (params: {
       githubUrl: u.githubUrl || s?.githubUrl || null,
       linkedinUrl: u.linkedinUrl || s?.linkedinUrl || null,
       facebookUrl: u.facebookUrl || s?.facebookUrl || null,
-      executives:
-        (execMap.get(u.id) && execMap.get(u.id)!.length > 0)
-          ? execMap.get(u.id)!
-          : s?.committeeNumber
-          ? [
-              {
-                role: s.designation || 'Member',
-                position: s.designation || 'Executive Member',
-                committeeNumber: s.committeeNumber,
-              },
-            ]
-          : [],
+      executives: userExecs,
+      history: userExecs,
     };
   });
 

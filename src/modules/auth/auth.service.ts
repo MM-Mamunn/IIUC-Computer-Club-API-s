@@ -477,62 +477,115 @@ export const updateUser = async (data: UpdateUserInput, c: Context) => {
     ? skills
     : undefined;
 
-  // Sync committee_submissions
-  const [existingSub] = await db
+  // 1. Resolve target committee number
+  let targetCommNumber = committeeNumber ? String(committeeNumber).trim() : undefined;
+  if (!targetCommNumber) {
+    const [latestActive] = await db
+      .select({ number: committee.number, session: committee.session })
+      .from(committee)
+      .where(and(isNull(committee.end), eq(committee.isActive, true)))
+      .orderBy(desc(committee.start))
+      .limit(1);
+    targetCommNumber = latestActive?.number || '2027';
+  }
+
+  // 2. Resolve committee session label if not provided
+  let targetSession = session ? String(session).trim() : undefined;
+  if (!targetSession && targetCommNumber) {
+    const [commRow] = await db
+      .select({ session: committee.session })
+      .from(committee)
+      .where(eq(committee.number, targetCommNumber))
+      .limit(1);
+    targetSession = commRow?.session || undefined;
+  }
+
+  // 3. Find existing submission specifically for THIS target committee
+  const [existingSubForTarget] = await db
+    .select()
+    .from(committeeSubmissions)
+    .where(
+      and(
+        or(eq(committeeSubmissions.matrixId, user.id), eq(committeeSubmissions.email, updatedUser.email)),
+        eq(committeeSubmissions.committeeNumber, targetCommNumber),
+      ),
+    )
+    .limit(1);
+
+  // Fallback to any latest submission only for default values (like batch or skills if not provided)
+  const [latestSub] = await db
     .select()
     .from(committeeSubmissions)
     .where(or(eq(committeeSubmissions.matrixId, user.id), eq(committeeSubmissions.email, updatedUser.email)))
     .orderBy(desc(committeeSubmissions.id))
     .limit(1);
 
-  if (existingSub) {
+  const finalDesignation =
+    designation !== undefined
+      ? designation || existingSubForTarget?.designation || latestSub?.designation
+      : existingSubForTarget?.designation || latestSub?.designation;
+
+  if (existingSubForTarget) {
     await db
       .update(committeeSubmissions)
       .set({
         name: updatedUser.name,
-        designation: designation !== undefined ? (designation || existingSub.designation || 'General Member') : existingSub.designation,
-        batch: batch !== undefined ? (batch || existingSub.batch) : existingSub.batch,
+        designation: finalDesignation || 'General Member',
+        batch: batch !== undefined ? batch || existingSubForTarget.batch : existingSubForTarget.batch,
         email: updatedUser.email,
-        committeeNumber: committeeNumber !== undefined ? committeeNumber : existingSub.committeeNumber,
-        session: session !== undefined ? session : existingSub.session,
-        photoUrl: updatedUser.profileImage || existingSub.photoUrl,
-        bio: updatedUser.description !== undefined ? updatedUser.description : existingSub.bio,
-        skills: formattedSkills !== undefined ? formattedSkills : existingSub.skills,
-        portfolioUrl: (portfolioUrl !== undefined ? portfolioUrl : existingSub.portfolioUrl) || updatedUser.twitterUrl || null,
-        githubUrl: updatedUser.githubUrl !== undefined ? updatedUser.githubUrl : existingSub.githubUrl,
-        linkedinUrl: updatedUser.linkedinUrl !== undefined ? updatedUser.linkedinUrl : existingSub.linkedinUrl,
-        facebookUrl: updatedUser.facebookUrl !== undefined ? updatedUser.facebookUrl : existingSub.facebookUrl,
+        session: targetSession || existingSubForTarget.session,
+        photoUrl: updatedUser.profileImage || existingSubForTarget.photoUrl,
+        bio: updatedUser.description !== undefined ? updatedUser.description : existingSubForTarget.bio,
+        skills: formattedSkills !== undefined ? formattedSkills : existingSubForTarget.skills,
+        portfolioUrl:
+          (portfolioUrl !== undefined ? portfolioUrl : existingSubForTarget.portfolioUrl) ||
+          updatedUser.twitterUrl ||
+          null,
+        githubUrl: updatedUser.githubUrl !== undefined ? updatedUser.githubUrl : existingSubForTarget.githubUrl,
+        linkedinUrl: updatedUser.linkedinUrl !== undefined ? updatedUser.linkedinUrl : existingSubForTarget.linkedinUrl,
+        facebookUrl: updatedUser.facebookUrl !== undefined ? updatedUser.facebookUrl : existingSubForTarget.facebookUrl,
         updatedAt: new Date(),
       })
-      .where(eq(committeeSubmissions.id, existingSub.id));
-  } else if (batch || designation || committeeNumber || session || formattedSkills || portfolioUrl) {
-    // Insert new committee submission record if user didn't have one before
+      .where(eq(committeeSubmissions.id, existingSubForTarget.id));
+  } else if (finalDesignation || batch || formattedSkills || portfolioUrl || targetCommNumber) {
+    // Insert new committee submission record for this specific committee tenure
     await db.insert(committeeSubmissions).values({
       name: updatedUser.name,
-      designation: designation || 'General Member',
+      designation: finalDesignation || 'General Member',
       matrixId: user.id,
-      batch: batch || 'Batch 58',
+      batch: batch || updatedUser.batch || latestSub?.batch || 'Batch 58',
       email: updatedUser.email,
-      committeeNumber: committeeNumber || null,
-      session: session || null,
-      photoUrl: updatedUser.profileImage || null,
-      bio: updatedUser.description || null,
-      skills: formattedSkills || '[]',
-      portfolioUrl: portfolioUrl || updatedUser.twitterUrl || null,
-      githubUrl: updatedUser.githubUrl || null,
-      linkedinUrl: updatedUser.linkedinUrl || null,
-      facebookUrl: updatedUser.facebookUrl || null,
-      status: 'pending',
+      committeeNumber: targetCommNumber,
+      session: targetSession || latestSub?.session || null,
+      photoUrl: updatedUser.profileImage || latestSub?.photoUrl || null,
+      bio: updatedUser.description || latestSub?.bio || null,
+      skills: formattedSkills || latestSub?.skills || '[]',
+      portfolioUrl: portfolioUrl || updatedUser.twitterUrl || latestSub?.portfolioUrl || null,
+      githubUrl: updatedUser.githubUrl || latestSub?.githubUrl || null,
+      linkedinUrl: updatedUser.linkedinUrl || latestSub?.linkedinUrl || null,
+      facebookUrl: updatedUser.facebookUrl || latestSub?.facebookUrl || null,
+      status: 'approved',
     });
   }
 
-  // Sync with executives table so positions and roles are fully unified
-  const finalDesignation = designation !== undefined ? (designation || existingSub?.designation) : existingSub?.designation;
-  const targetCommNumber = committeeNumber !== undefined ? (committeeNumber || existingSub?.committeeNumber) : existingSub?.committeeNumber;
+  // 4. Also keep general user profile fields (name, email, photoUrl, bio, social) synced on any other past committee submissions
+  await db
+    .update(committeeSubmissions)
+    .set({
+      name: updatedUser.name,
+      email: updatedUser.email,
+      photoUrl: updatedUser.profileImage || undefined,
+      bio: updatedUser.description !== undefined ? updatedUser.description : undefined,
+      githubUrl: updatedUser.githubUrl !== undefined ? updatedUser.githubUrl : undefined,
+      linkedinUrl: updatedUser.linkedinUrl !== undefined ? updatedUser.linkedinUrl : undefined,
+      facebookUrl: updatedUser.facebookUrl !== undefined ? updatedUser.facebookUrl : undefined,
+      updatedAt: new Date(),
+    })
+    .where(eq(committeeSubmissions.matrixId, user.id));
 
+  // 5. Sync with executives table specifically for targetCommNumber
   if (finalDesignation && targetCommNumber) {
     const posKey = finalDesignation.toLowerCase().trim();
-    // Ensure position exists in positions table
     await db
       .insert(positions)
       .values({
@@ -543,7 +596,6 @@ export const updateUser = async (data: UpdateUserInput, c: Context) => {
 
     const normalizedRole = mapDesignationToRole(finalDesignation);
 
-    // Upsert executives record so position and role are completely in sync
     await db
       .insert(executives)
       .values({
