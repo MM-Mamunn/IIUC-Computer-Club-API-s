@@ -323,7 +323,9 @@ export const addSecretaries = async (
     })
     .returning();
 
-  await syncCommitteeSubmissionDesignation(id, number, position || role);
+  const cleanPos = (position || role).replace(/^assistant\s*secretary\s*\d+$/i, 'Assistant Secretary');
+  const titlePos = cleanPos.replace(/\b\w/g, (ch) => ch.toUpperCase());
+  await syncCommitteeSubmissionDesignation(id, number, titlePos);
   invalidate('committee:');
   invalidate('dashboard:');
   invalidate('users:');

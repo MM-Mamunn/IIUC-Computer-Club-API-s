@@ -239,6 +239,8 @@ export const showMembers = async (number: string) => {
     throw new HTTPException(404, { message: 'Committee not found' });
   }
 
+  const isCurrent = Boolean(com.isActive && com.end === null);
+
   return cached(`committee:members:${number}`, 60_000, async () => {
     const rows = await db
       .select({
@@ -325,19 +327,22 @@ export const showMembers = async (number: string) => {
         if (agsM) {
           tenureDesignation = `Assistant General Secretary ${agsM[1]}`;
         } else {
-          const asM =
-            (t.role || '').match(/(?:assistant\s*secretary|as)[-\s]*(\d+)/i) ||
-            (tenureDesignation || '').match(/(?:assistant\s*secretary|as)[-\s]*(\d+)/i);
-          if (asM) {
-            tenureDesignation = `Assistant Secretary ${asM[1]}`;
+          // ponytail: previous committees used numbered assistant secretary slots if no specific title exists
+          const isCurrentTenure = t.committeeNumber === '2027' || t.committeeNumber === '2027F';
+          if (isCurrentTenure) {
+            tenureDesignation = tenureDesignation.replace(/^assistant\s*secretary\s*\d+$/i, 'assistant secretary');
+          } else if (tenureDesignation.toLowerCase() === 'assistant secretary') {
+            const asM = (t.role || '').match(/^assistant\s*secretary\s*(\d+)$/i);
+            if (asM) tenureDesignation = `Assistant Secretary ${asM[1]}`;
           }
         }
       }
       const arr = tenuresByMember.get(t.id) || [];
+      const cleanTenureDesig = tenureDesignation ? tenureDesignation.replace(/\b\w/g, (c) => c.toUpperCase()) : tenureDesignation;
       arr.push({
         committeeNumber: t.committeeNumber,
         session: t.session,
-        designation: tenureDesignation,
+        designation: cleanTenureDesig,
         role: t.role,
       });
       tenuresByMember.set(t.id, arr);
@@ -358,10 +363,7 @@ export const showMembers = async (number: string) => {
       if (/(?:assistant\s*general\s*secretary|ags)[-\s]*2\b/i.test(text)) return 4.2;
       if (/(?:assistant\s*general\s*secretary|ags)[-\s]*3\b/i.test(text)) return 4.3;
       if (text.includes('assistant general secretary') || text.includes('ags')) return 4.4;
-      if (/(?:assistant\s*secretary|as)[-\s]*1\b/i.test(text)) return 6.1;
-      if (/(?:assistant\s*secretary|as)[-\s]*2\b/i.test(text)) return 6.2;
-      if (/(?:assistant\s*secretary|as)[-\s]*3\b/i.test(text)) return 6.3;
-      if (text.includes('assistant secretary')) return 6.4;
+      if (text.includes('assistant secretary') || (text.includes('assistant') && text.includes('secretary'))) return 6;
       if (text.includes('secretary')) return 5;
       return 7;
     };
@@ -396,15 +398,20 @@ export const showMembers = async (number: string) => {
           (displayPosition || '').match(/(?:assistant\s*general\s*secretary|ags)[-\s]*(\d+)/i);
         if (agsMatch) {
           displayPosition = `Assistant General Secretary ${agsMatch[1]}`;
-        } else {
-          const asMatch =
-            (r.role || '').match(/(?:assistant\s*secretary|as)[-\s]*(\d+)/i) ||
-            (displayPosition || '').match(/(?:assistant\s*secretary|as)[-\s]*(\d+)/i);
+        } else if (!isCurrent) {
+          // ponytail: previous committees used numbered assistant secretary slots if no specific title exists
+          const asMatch = (displayPosition || '').match(/^assistant\s*secretary\s*(\d+)$/i) ||
+            (displayPosition && displayPosition.toLowerCase() === 'assistant secretary' ? (r.role || '').match(/^assistant\s*secretary\s*(\d+)$/i) : null);
           if (asMatch) {
             displayPosition = `Assistant Secretary ${asMatch[1]}`;
           }
+        } else if (displayPosition) {
+          // For current committee, assistant secretaries have NO numbers
+          displayPosition = displayPosition.replace(/^assistant\s*secretary\s*\d+$/i, 'assistant secretary');
         }
       }
+
+      const formattedPosition = displayPosition ? displayPosition.replace(/\b\w/g, (c) => c.toUpperCase()) : displayPosition;
 
       return {
         id: r.id,
@@ -413,8 +420,8 @@ export const showMembers = async (number: string) => {
         gender: r.gender,
         profileImage: r.profileImage,
         role: r.role,
-        position: displayPosition,
-        designation: displayPosition,
+        position: formattedPosition,
+        designation: formattedPosition,
         batch: r.subBatch || r.userBatch || null,
         bio: r.subBio || r.userBio || null,
         githubUrl: r.githubUrl,
