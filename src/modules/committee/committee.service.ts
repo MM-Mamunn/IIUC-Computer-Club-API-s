@@ -308,6 +308,36 @@ export const showMembers = async (number: string) => {
       tenuresByMember.set(t.id, arr);
     }
 
+    // Sort rows so President is 1, all Vice Presidents are 2.x, and Treasurer is ALWAYS at the end of Tier 2
+    const getRoleRank = (role?: string | null, position?: string | null): number => {
+      const text = `${role || ''} ${position || ''}`.toLowerCase();
+      if (text.includes('president') && !text.includes('vice')) return 1;
+      if (text.includes('vice president 1') || text.includes('vp 1') || text.includes('vp-1') || text.includes('vice-president 1')) return 2.1;
+      if (text.includes('vice president 2') || text.includes('vp 2') || text.includes('vp-2') || text.includes('vice-president 2')) return 2.2;
+      if (text.includes('vice president 3') || text.includes('vp 3') || text.includes('vp-3') || text.includes('vice-president 3')) return 2.3;
+      if (text.includes('vice president 4') || text.includes('vp 4') || text.includes('vp-4') || text.includes('vice-president 4')) return 2.4;
+      if (text.includes('vice president') || text.includes('vice-president')) return 2.5;
+      if (text.includes('treasurer')) return 2.9; // Treasurer ALWAYS comes after all Vice Presidents!
+      if (text.includes('general secretary') && !text.includes('assistant')) return 3;
+      if (text.includes('assistant general secretary 1') || text.includes('ags 1')) return 4.1;
+      if (text.includes('assistant general secretary 2') || text.includes('ags 2')) return 4.2;
+      if (text.includes('assistant general secretary 3') || text.includes('ags 3')) return 4.3;
+      if (text.includes('assistant general secretary') || text.includes('ags')) return 4.4;
+      if (text.includes('assistant secretary 1')) return 6.1;
+      if (text.includes('assistant secretary 2')) return 6.2;
+      if (text.includes('assistant secretary 3')) return 6.3;
+      if (text.includes('assistant secretary')) return 6.4;
+      if (text.includes('secretary')) return 5;
+      return 7;
+    };
+
+    rows.sort((a, b) => {
+      const rankA = getRoleRank(a.role, a.subDesignation || a.position);
+      const rankB = getRoleRank(b.role, b.subDesignation || b.position);
+      if (rankA !== rankB) return rankA - rankB;
+      return a.name.localeCompare(b.name);
+    });
+
     return rows.map((r) => {
       let parsedSkills: string[] = [];
       if (r.subSkills) {
