@@ -520,6 +520,8 @@ export const updateUser = async (data: UpdateUserInput, c: Context) => {
     .orderBy(desc(committeeSubmissions.id))
     .limit(1);
 
+  const existingSub = existingSubForTarget || latestSub;
+
   const finalDesignation =
     designation !== undefined
       ? designation || existingSubForTarget?.designation || latestSub?.designation
