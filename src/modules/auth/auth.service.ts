@@ -339,22 +339,23 @@ export const showMe = async (c: Context) => {
     throw new HTTPException(404, { message: 'User not found' });
   }
 
-  // Also query committee_submissions to get batch, skills, designation, committeeNumber, session, portfolioUrl
-  const [submission] = await db
-    .select()
-    .from(committeeSubmissions)
-    .where(or(eq(committeeSubmissions.matrixId, user.id), eq(committeeSubmissions.email, me.email)))
-    .orderBy(desc(committeeSubmissions.id))
-    .limit(1);
+  // 1. Fetch active committee numbers
+  const activeComms = await showActive();
+  const activeNumbers = new Set(activeComms.map((a) => a.number));
 
-  // Query all historical and present committee tenures for this user
+  // 2. Query all historical and present committee tenures for this user
   const tenures = await db
     .select({
       committeeNumber: executives.number,
       session: committee.session,
       position: executives.position,
       role: executives.role,
+      isActive: committee.isActive,
+      end: committee.end,
       designation: committeeSubmissions.designation,
+      subBatch: committeeSubmissions.batch,
+      subSkills: committeeSubmissions.skills,
+      subPortfolio: committeeSubmissions.portfolioUrl,
     })
     .from(executives)
     .innerJoin(committee, eq(executives.number, committee.number))
@@ -368,31 +369,74 @@ export const showMe = async (c: Context) => {
     .where(eq(executives.id, user.id))
     .orderBy(desc(committee.start));
 
+  // Determine active present tenure (first matching active committee, or fallback to latest)
+  const activeTenure =
+    tenures.find((t) => activeNumbers.has(t.committeeNumber) || t.end === null || t.isActive) ||
+    tenures[0];
+
   const formattedTenures = tenures.map((t) => ({
     committeeNumber: t.committeeNumber,
     session: t.session,
     position: t.designation || t.position,
     role: t.role,
+    isActive: Boolean(activeNumbers.has(t.committeeNumber) || t.end === null || t.isActive),
   }));
 
+  // Fallback to latest submission if activeTenure has no submission
+  const [submission] = await db
+    .select()
+    .from(committeeSubmissions)
+    .where(
+      and(
+        or(eq(committeeSubmissions.matrixId, user.id), eq(committeeSubmissions.email, me.email)),
+        activeTenure?.committeeNumber
+          ? eq(committeeSubmissions.committeeNumber, activeTenure.committeeNumber)
+          : undefined,
+      ),
+    )
+    .limit(1);
+
+  const fallbackSub =
+    submission ||
+    (
+      await db
+        .select()
+        .from(committeeSubmissions)
+        .where(or(eq(committeeSubmissions.matrixId, user.id), eq(committeeSubmissions.email, me.email)))
+        .orderBy(desc(committeeSubmissions.id))
+        .limit(1)
+    )[0];
+
   let skillsList: string[] = [];
-  if (submission?.skills) {
+  const primarySkills = activeTenure?.subSkills || fallbackSub?.skills;
+  if (primarySkills) {
     try {
-      const parsed = JSON.parse(submission.skills);
-      skillsList = Array.isArray(parsed) ? parsed : [submission.skills];
+      const parsed = JSON.parse(primarySkills);
+      skillsList = Array.isArray(parsed) ? parsed : [primarySkills];
     } catch {
-      skillsList = submission.skills.split(',').map((s) => s.trim()).filter(Boolean);
+      skillsList = primarySkills.split(',').map((s) => s.trim()).filter(Boolean);
     }
   }
 
+  const primaryDesignation =
+    activeTenure?.designation || activeTenure?.position || fallbackSub?.designation || null;
+  const primaryCommNumber =
+    activeTenure?.committeeNumber || fallbackSub?.committeeNumber || null;
+  const primarySession =
+    activeTenure?.session || fallbackSub?.session || null;
+  const primaryPortfolio =
+    activeTenure?.subPortfolio || fallbackSub?.portfolioUrl || me.twitterUrl || null;
+  const primaryBatch =
+    me.batch || activeTenure?.subBatch || fallbackSub?.batch || null;
+
   return {
     ...me,
-    batch: me.batch || submission?.batch || null,
+    batch: primaryBatch,
     skills: skillsList,
-    designation: submission?.designation || formattedTenures[0]?.position || null,
-    committeeNumber: submission?.committeeNumber || formattedTenures[0]?.committeeNumber || null,
-    session: submission?.session || formattedTenures[0]?.session || null,
-    portfolioUrl: submission?.portfolioUrl || me.twitterUrl || null,
+    designation: primaryDesignation,
+    committeeNumber: primaryCommNumber,
+    session: primarySession,
+    portfolioUrl: primaryPortfolio,
     tenures: formattedTenures,
   };
 };
@@ -656,6 +700,37 @@ export const updateUser = async (data: UpdateUserInput, c: Context) => {
     mustChangePassword: false,
   });
 
+  const userTenures = await db
+    .select({
+      committeeNumber: executives.number,
+      session: committee.session,
+      position: executives.position,
+      role: executives.role,
+      isActive: committee.isActive,
+      end: committee.end,
+      designation: committeeSubmissions.designation,
+    })
+    .from(executives)
+    .innerJoin(committee, eq(executives.number, committee.number))
+    .leftJoin(
+      committeeSubmissions,
+      and(
+        eq(committeeSubmissions.matrixId, executives.id),
+        eq(committeeSubmissions.committeeNumber, executives.number),
+      ),
+    )
+    .where(eq(executives.id, user.id))
+    .orderBy(desc(committee.start));
+
+  const activeSet = new Set(activeNumbers);
+  const formattedTenures = userTenures.map((t) => ({
+    committeeNumber: t.committeeNumber,
+    session: t.session,
+    position: t.designation || t.position,
+    role: t.role,
+    isActive: Boolean(activeSet.has(t.committeeNumber) || t.end === null || t.isActive),
+  }));
+
   return {
     ...updatedUser,
     batch: batch !== undefined ? batch : updatedUser.batch || existingSub?.batch || null,
@@ -664,6 +739,7 @@ export const updateUser = async (data: UpdateUserInput, c: Context) => {
     committeeNumber: targetCommNumber || null,
     session: session !== undefined ? session : existingSub?.session || null,
     portfolioUrl: portfolioUrl || updatedUser.twitterUrl || null,
+    tenures: formattedTenures,
     token,
   };
 };
