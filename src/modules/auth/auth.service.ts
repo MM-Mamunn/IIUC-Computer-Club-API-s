@@ -1,6 +1,6 @@
 import { db } from '../../config/db';
 import { executives, users, committeeSubmissions, committee, positions } from '../../db/schema';
-import { and, eq, inArray, desc, or } from 'drizzle-orm';
+import { and, eq, inArray, desc, or, isNull } from 'drizzle-orm';
 import { hashPassword, comparePassword } from '../../utils/hash';
 import { generateToken } from '../../utils/jwt';
 import { HTTPException } from 'hono/http-exception';

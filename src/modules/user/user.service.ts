@@ -70,6 +70,7 @@ export const getUserDirectory = async (params: {
       profileImage: users.profileImage,
       idCard: users.idCard,
       department: users.department,
+      batch: users.batch,
       description: users.description,
       githubUrl: users.githubUrl,
       linkedinUrl: users.linkedinUrl,
