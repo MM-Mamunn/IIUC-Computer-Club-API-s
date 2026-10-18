@@ -127,18 +127,31 @@ export const addCommittee = async (
 
 export const showActive = () =>
   cached('committee:active', 60_000, async () => {
-    return db
+    const activeList = await db
       .select({
         number: committee.number,
         gender: committee.gender,
         start: committee.start,
         session: committee.session,
         end: committee.end,
+        isActive: committee.isActive,
         description: committee.description,
         beginningBudget: committee.beginningBudget,
       })
       .from(committee)
-      .where(isNull(committee.end));
+      .where(and(isNull(committee.end), eq(committee.isActive, true)))
+      .orderBy(desc(committee.start));
+
+    // Ensure only the latest active committee per gender is returned (one active session)
+    const seen = new Set<string>();
+    const result: typeof activeList = [];
+    for (const c of activeList) {
+      if (!seen.has(c.gender)) {
+        seen.add(c.gender);
+        result.push(c);
+      }
+    }
+    return result;
   });
 
 export const showPositions = async (number: string, c: Context) => {
@@ -159,6 +172,7 @@ export const showAllCommittees = () =>
         start: committee.start,
         session: committee.session,
         end: committee.end,
+        isActive: committee.isActive,
         description: committee.description,
         beginningBudget: committee.beginningBudget,
       })
@@ -205,7 +219,7 @@ export const closeCommittee = async (number: string, endDate: string, userId?: s
   // Close this committee
   const [updated] = await db
     .update(committee)
-    .set({ end: endDate })
+    .set({ end: endDate, isActive: false })
     .where(eq(committee.number, number))
     .returning();
 
@@ -298,11 +312,18 @@ export const showMembers = async (number: string) => {
     >();
 
     for (const t of allTenures) {
+      let tenureDesignation = t.subDesignation || t.position || 'Member';
+      const vpM =
+        (t.role || '').match(/vice\s*president\s*(\d+)/i) ||
+        (tenureDesignation || '').match(/vice\s*president\s*(\d+)/i);
+      if (vpM) {
+        tenureDesignation = `Vice President ${vpM[1]}`;
+      }
       const arr = tenuresByMember.get(t.id) || [];
       arr.push({
         committeeNumber: t.committeeNumber,
         session: t.session,
-        designation: t.subDesignation || t.position || 'Member',
+        designation: tenureDesignation,
         role: t.role,
       });
       tenuresByMember.set(t.id, arr);
@@ -349,7 +370,27 @@ export const showMembers = async (number: string) => {
         }
       }
 
-      const displayPosition = r.subDesignation || r.position;
+      let displayPosition = r.subDesignation || r.position;
+      const vpMatch =
+        (r.role || '').match(/vice\s*president\s*(\d+)/i) ||
+        (displayPosition || '').match(/vice\s*president\s*(\d+)/i);
+      if (vpMatch) {
+        displayPosition = `Vice President ${vpMatch[1]}`;
+      } else {
+        const agsMatch =
+          (r.role || '').match(/assistant\s*general\s*secretary\s*(\d+)/i) ||
+          (displayPosition || '').match(/assistant\s*general\s*secretary\s*(\d+)/i);
+        if (agsMatch) {
+          displayPosition = `Assistant General Secretary ${agsMatch[1]}`;
+        } else {
+          const asMatch =
+            (r.role || '').match(/assistant\s*secretary\s*(\d+)/i) ||
+            (displayPosition || '').match(/assistant\s*secretary\s*(\d+)/i);
+          if (asMatch) {
+            displayPosition = `Assistant Secretary ${asMatch[1]}`;
+          }
+        }
+      }
 
       return {
         id: r.id,

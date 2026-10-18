@@ -95,7 +95,8 @@ export const addVicePresident = async (id: string, role: string, number: string,
     })
     .returning();
 
-  await syncCommitteeSubmissionDesignation(id, number, 'Vice President');
+  const vpTitle = role.replace(/\b\w/g, (c) => c.toUpperCase());
+  await syncCommitteeSubmissionDesignation(id, number, vpTitle);
   invalidate('committee:');
   invalidate('dashboard:');
   invalidate('users:');

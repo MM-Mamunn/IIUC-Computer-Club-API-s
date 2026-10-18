@@ -371,7 +371,8 @@ export const showMe = async (c: Context) => {
 
   // Determine active present tenure (first matching active committee, or fallback to latest)
   const activeTenure =
-    tenures.find((t) => activeNumbers.has(t.committeeNumber) || t.end === null || t.isActive) ||
+    tenures.find((t) => activeNumbers.has(t.committeeNumber) && t.end === null && t.isActive) ||
+    tenures.find((t) => activeNumbers.has(t.committeeNumber)) ||
     tenures[0];
 
   const formattedTenures = tenures.map((t) => ({
@@ -379,7 +380,7 @@ export const showMe = async (c: Context) => {
     session: t.session,
     position: t.designation || t.position,
     role: t.role,
-    isActive: Boolean(activeNumbers.has(t.committeeNumber) || t.end === null || t.isActive),
+    isActive: Boolean(activeNumbers.has(t.committeeNumber) && t.end === null && t.isActive),
   }));
 
   // Fallback to latest submission if activeTenure has no submission
@@ -728,7 +729,7 @@ export const updateUser = async (data: UpdateUserInput, c: Context) => {
     session: t.session,
     position: t.designation || t.position,
     role: t.role,
-    isActive: Boolean(activeSet.has(t.committeeNumber) || t.end === null || t.isActive),
+    isActive: Boolean(activeSet.has(t.committeeNumber) && t.end === null && t.isActive),
   }));
 
   return {
