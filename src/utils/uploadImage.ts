@@ -73,3 +73,47 @@ export const uploadImageToCloudinary = async (file: File): Promise<string> => {
 
   return uploadResult.secure_url;
 };
+
+export const isBase64Image = (value: unknown): value is string =>
+  typeof value === 'string' && /^data:image\/[a-z0-9.+-]+;base64,/i.test(value.trim());
+
+/**
+ * Upload a base64 data URI image to Cloudinary
+ * @param dataUri e.g. "data:image/png;base64,...."
+ * @returns secure image URL
+ */
+export const uploadDataUriToCloudinary = async (dataUri: string): Promise<string> => {
+  const payload = dataUri.trim();
+  // base64 encodes 3 bytes in 4 chars
+  const approxBytes = Math.floor(((payload.length - payload.indexOf(',') - 1) * 3) / 4);
+  if (approxBytes > MAX_IMAGE_SIZE_BYTES) {
+    throw new HTTPException(413, {
+      message: `Image is too large. Maximum allowed size is ${MAX_IMAGE_SIZE_MB}MB.`,
+    });
+  }
+
+  if (!isCloudinaryConfigured()) {
+    throw new HTTPException(500, {
+      message: 'Image upload is unavailable. Server upload credentials are not configured.',
+    });
+  }
+
+  try {
+    const result = await cloudinary.uploader.upload(payload, { folder: 'ccapi' });
+    if (!result?.secure_url) {
+      throw new Error('missing secure URL in response');
+    }
+    return result.secure_url;
+  } catch (error) {
+    if (error instanceof HTTPException) throw error;
+    const message = (error as { message?: string })?.message || 'Unknown Cloudinary upload error';
+    throw new HTTPException(502, { message: `Cloudinary upload failed: ${message}` });
+  }
+};
+
+/**
+ * Never store base64 images in the database: upload them and keep only the URL.
+ * Other values (URLs, null, undefined) are returned unchanged.
+ */
+export const resolveImageInput = async <T extends string | null | undefined>(value: T): Promise<T | string> =>
+  isBase64Image(value) ? uploadDataUriToCloudinary(value) : value;

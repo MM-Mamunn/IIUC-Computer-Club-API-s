@@ -5,7 +5,12 @@ import { committee, executives, users, committeeSubmissions, roles, positions } 
 import { HTTPException } from 'hono/http-exception';
 import { and, eq, isNull, isNotNull, desc, or, asc, inArray } from 'drizzle-orm';
 import { cached, invalidate } from '../../utils/cache';
-import { uploadImageToCloudinary } from '../../utils/uploadImage';
+import {
+  uploadImageToCloudinary,
+  isBase64Image,
+  uploadDataUriToCloudinary,
+  resolveImageInput,
+} from '../../utils/uploadImage';
 import { hashPassword } from '../../utils/hash';
 import { generateToken } from '../../utils/jwt';
 
@@ -278,6 +283,27 @@ export const showMembers = async (number: string) => {
       .where(eq(executives.number, number))
       .orderBy(asc(roles.priority), asc(users.name));
 
+    // Legacy rows stored photos as base64 (MBs per member). Move them to Cloudinary
+    // once, and never send base64 to clients.
+    await Promise.all(
+      rows.map(async (r) => {
+        if (!isBase64Image(r.profileImage)) return;
+        const legacy = r.profileImage;
+        try {
+          const url = await uploadDataUriToCloudinary(legacy);
+          await db.update(users).set({ profileImage: url }).where(eq(users.id, r.id));
+          await db
+            .update(committeeSubmissions)
+            .set({ photoUrl: url })
+            .where(eq(committeeSubmissions.photoUrl, legacy));
+          r.profileImage = url;
+        } catch (err) {
+          console.error(`[members] Failed to migrate base64 photo for ${r.id}:`, err);
+          r.profileImage = null;
+        }
+      }),
+    );
+
     const memberIds = Array.from(new Set(rows.map((r) => r.id)));
     const allTenures =
       memberIds.length > 0
@@ -549,6 +575,8 @@ export const submitCommitteeApplication = async (data: CommitteeSubmissionInput)
   } else if (typeof data.photo === 'string' && data.photo.trim().length > 0) {
     photoUrl = data.photo.trim();
   }
+  // Base64 photos bloat every members response; store only the Cloudinary URL
+  photoUrl = await resolveImageInput(photoUrl);
 
   const autoApprove = (process.env.COMMITTEE_AUTO_APPROVE ?? 'true').toLowerCase() === 'true';
   const effectiveStatus = autoApprove ? 'approved' : 'pending';

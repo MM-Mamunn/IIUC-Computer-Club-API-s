@@ -63,6 +63,8 @@ export const close = async (c: Context) => {
 export const members = async (c: Context) => {
   const number = c.req.param('number');
   const membersList = await showMembers(number);
+  // Let Vercel's CDN serve repeat visits instead of invoking the function every time
+  c.header('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=600');
   return c.json({ members: membersList }, 200);
 };
 
