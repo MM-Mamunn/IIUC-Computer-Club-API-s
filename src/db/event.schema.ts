@@ -124,6 +124,9 @@ export const events = pgTable('events', {
   /** The URL of the external registration form */
   externalFormUrl: text('external_form_url'),
 
+  /** Participants get digital certificates once the event is completed */
+  certificateEnabled: boolean('certificate_enabled').notNull().default(false),
+
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 
@@ -496,3 +499,96 @@ export const refundRequests = pgTable(
     uniq: uniqueIndex('refund_requests_event_user_uniq').on(table.eventId, table.userId),
   }),
 );
+
+/* =========================
+   CERTIFICATE TEMPLATES
+   (one per event: the designers' background image + where each text goes)
+========================= */
+
+/**
+ * A text or QR element placed on the certificate. Positions and sizes are
+ * fractions of the background (0–1), so the layout holds at any render size.
+ */
+export type CertificateField = {
+  id: string;
+  /** name | eventTitle | eventDate | certificateId | custom | qr */
+  type: string;
+  /** Text for `custom` fields */
+  text?: string;
+  /** Centre point of the element */
+  x: number;
+  y: number;
+  /** Text height (or QR size) as a fraction of the background height */
+  size: number;
+  fontFamily?: string;
+  fontWeight?: string;
+  color?: string;
+  align?: 'left' | 'center' | 'right';
+  /** Long names shrink to fit this width (fraction of background width) */
+  maxWidth?: number;
+};
+
+export const certificateTemplates = pgTable('certificate_templates', {
+  id: serial('id').primaryKey(),
+
+  eventId: integer('event_id')
+    .notNull()
+    .unique()
+    .references(() => events.id, { onDelete: 'cascade', onUpdate: 'cascade' }),
+
+  /** Background design uploaded to Cloudinary (PNG/JPG, or page 1 of a PDF) */
+  backgroundUrl: text('background_url').notNull(),
+
+  /** Natural size of the background in pixels (fixes the aspect ratio) */
+  width: integer('width').notNull(),
+  height: integer('height').notNull(),
+
+  fields: jsonb('fields').$type<CertificateField[]>().notNull().default([]),
+
+  updatedBy: varchar('updated_by', { length: 255 }).references(() => users.id, {
+    onDelete: 'set null',
+    onUpdate: 'cascade',
+  }),
+
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+});
+
+/* =========================
+   CERTIFICATES
+   (one row per issued certificate; the public code verifies it)
+========================= */
+export const certificates = pgTable('certificates', {
+  id: serial('id').primaryKey(),
+
+  /** Public verification code printed on the certificate, e.g. CC54-7K2M9Q */
+  code: varchar('code', { length: 32 }).notNull().unique(),
+
+  eventId: integer('event_id')
+    .notNull()
+    .references(() => events.id, { onDelete: 'cascade', onUpdate: 'cascade' }),
+
+  recipientName: varchar('recipient_name', { length: 255 }).notNull(),
+  recipientEmail: varchar('recipient_email', { length: 255 }),
+  matrixId: varchar('matrix_id', { length: 50 }),
+
+  /** Linked platform account, when the recipient has one */
+  userId: varchar('user_id', { length: 255 }).references(() => users.id, {
+    onDelete: 'set null',
+    onUpdate: 'cascade',
+  }),
+
+  /** registration | import | manual */
+  source: varchar('source', { length: 20 }).notNull().default('registration'),
+
+  issuedBy: varchar('issued_by', { length: 255 }).references(() => users.id, {
+    onDelete: 'set null',
+    onUpdate: 'cascade',
+  }),
+  issuedAt: timestamp('issued_at', { withTimezone: true }).defaultNow(),
+
+  /** Last time the certificate link was emailed to the recipient */
+  emailedAt: timestamp('emailed_at', { withTimezone: true }),
+
+  /** Revoked certificates fail verification but keep their code */
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+});

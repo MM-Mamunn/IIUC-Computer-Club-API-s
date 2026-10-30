@@ -3,6 +3,7 @@ import {
   createEvent,
   listEvents,
   getEventById,
+  checkSlugAvailability,
   updateEvent,
   deleteEvent,
   registerForEvent,
@@ -77,6 +78,8 @@ export const create = async (c: Context) => {
       isFeatured: formData.get('isFeatured') === 'true',
       useExternalForm: formData.get('useExternalForm') === 'true',
       externalFormUrl: (formData.get('externalFormUrl') as string) || undefined,
+      certificateEnabled: formData.get('certificateEnabled') === 'true',
+      slug: (formData.get('slug') as string) || undefined,
       estimatedBudget: formData.get('estimatedBudget')
         ? Number(formData.get('estimatedBudget'))
         : 0,
@@ -133,6 +136,12 @@ export const list = async (c: Context) => {
   return c.json({ events: eventsList }, 200);
 };
 
+export const slugAvailability = async (c: Context) => {
+  const slug = c.req.query('slug') ?? '';
+  const excludeId = Number(c.req.query('excludeId')) || undefined;
+  return c.json(await checkSlugAvailability(slug, excludeId), 200);
+};
+
 export const getOne = async (c: Context) => {
   const idParam = c.req.param('id');
   // Accept either a slug string or a numeric id (backward compat)
@@ -169,7 +178,13 @@ export const update = async (c: Context) => {
         }
         continue;
       }
-      if (key === 'isPaid' || key === 'sslcommerzEnabled' || key === 'isDonation' || key === 'useExternalForm') {
+      if (
+        key === 'isPaid' ||
+        key === 'sslcommerzEnabled' ||
+        key === 'isDonation' ||
+        key === 'useExternalForm' ||
+        key === 'certificateEnabled'
+      ) {
         data[key] = value === 'true';
         continue;
       }

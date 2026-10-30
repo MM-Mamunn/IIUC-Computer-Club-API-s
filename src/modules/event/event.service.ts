@@ -25,6 +25,7 @@ import {
 } from '../../utils/email';
 import { getBangladeshDayKey, getBangladeshYear } from '../../utils/datetime';
 import { generateToken, verifyToken } from '../../utils/jwt';
+import { slugify, isNumericSlug } from '../../utils/slug';
 
 function invalidateEventCaches() {
   invalidate('events:');
@@ -34,22 +35,43 @@ function invalidateEventCaches() {
 
 // ─── Slug Generation ───
 /**
- * Converts an event title + id into a URL-safe slug.
+ * Default slug when the creator doesn't choose one: title + id.
  * e.g. "Programming Contest 2026!" + id 50 → "programming-contest-2026-50"
  * The id suffix guarantees global uniqueness.
  */
 export function generateEventSlug(title: string, id: number): string {
-  const base = title
-    .toLowerCase()
-    .normalize('NFD')                    // decompose accents
-    .replace(/[\u0300-\u036f]/g, '')     // strip diacritics
-    .replace(/[^a-z0-9\s-]/g, '')        // keep alphanumeric, spaces, hyphens
-    .trim()
-    .replace(/\s+/g, '-')               // spaces → hyphens
-    .replace(/-+/g, '-')                // collapse multiple hyphens
-    .slice(0, 120);                      // cap base at 120 chars
-  return `${base}-${id}`;
+  return `${slugify(title) || 'event'}-${id}`;
 }
+
+const slugTakenWhere = (slug: string, excludeEventId?: number) =>
+  excludeEventId ? and(eq(events.slug, slug), ne(events.id, excludeEventId)) : eq(events.slug, slug);
+
+/**
+ * Validate a slug chosen in the event form. It is normalised with the same
+ * rules as generated slugs and must not be used by another event.
+ */
+async function resolveCustomSlug(input: unknown, excludeEventId?: number): Promise<string> {
+  const slug = slugify(String(input ?? ''), 150);
+  if (!slug) {
+    throw new HTTPException(400, { message: 'URL slug must contain at least one letter or number' });
+  }
+  if (isNumericSlug(slug)) {
+    throw new HTTPException(400, { message: 'URL slug cannot be only numbers' });
+  }
+  const [taken] = await db.select({ id: events.id }).from(events).where(slugTakenWhere(slug, excludeEventId)).limit(1);
+  if (taken) {
+    throw new HTTPException(409, { message: `The URL "/events/${slug}" is already used by another event` });
+  }
+  return slug;
+}
+
+/** Is `input` free to use as a slug? (normalised the same way the form will save it) */
+export const checkSlugAvailability = async (input: string, excludeEventId?: number) => {
+  const slug = slugify(input, 150);
+  if (!slug || isNumericSlug(slug)) return { slug, available: false };
+  const [taken] = await db.select({ id: events.id }).from(events).where(slugTakenWhere(slug, excludeEventId)).limit(1);
+  return { slug, available: !taken };
+};
 
 // ─── Create Event ───
 export const createEvent = async (
@@ -74,6 +96,8 @@ export const createEvent = async (
     isFeatured?: boolean;
     useExternalForm?: boolean;
     externalFormUrl?: string;
+    certificateEnabled?: boolean;
+    slug?: string;
   },
   c: Context,
 ) => {
@@ -83,6 +107,9 @@ export const createEvent = async (
   }
 
   await assertCommitteeOpen(data.committeeNumber);
+
+  // Slug chosen in the form; otherwise generated from the title once the id is known
+  const customSlug = data.slug ? await resolveCustomSlug(data.slug) : null;
 
   // Validate gender restriction
   const genderRestriction = data.genderRestriction ?? 'both';
@@ -137,12 +164,14 @@ export const createEvent = async (
         isFeatured: data.isFeatured ?? false,
         useExternalForm,
         externalFormUrl,
+        certificateEnabled: data.certificateEnabled ?? false,
+        slug: customSlug,
       })
       .returning();
   });
 
   // Generate slug now that we have the event id
-  if (event) {
+  if (event && !event.slug) {
     const slug = generateEventSlug(event.title, event.id);
     const [withSlug] = await db
       .update(events)
@@ -218,6 +247,7 @@ export const listEvents = (committeeNumber?: string, status?: string, gender?: s
           genderRestriction: events.genderRestriction,
           useExternalForm: events.useExternalForm,
           externalFormUrl: events.externalFormUrl,
+          certificateEnabled: events.certificateEnabled,
           slug: events.slug,
           createdAt: events.createdAt,
           registrationCount:
@@ -266,6 +296,7 @@ export const listEvents = (committeeNumber?: string, status?: string, gender?: s
         genderRestriction: events.genderRestriction,
         useExternalForm: events.useExternalForm,
         externalFormUrl: events.externalFormUrl,
+        certificateEnabled: events.certificateEnabled,
         slug: events.slug,
         createdAt: events.createdAt,
         registrationCount:
@@ -300,6 +331,12 @@ export const getEventById = async (idOrSlug: number | string) => {
   } else {
     // Slug lookup
     [event] = await db.select().from(events).where(eq(events.slug, String(idOrSlug)));
+    // Old links keep working after a slug change: generated slugs end in "-<id>"
+    // (e.g. the pre-fix "/events/-54"), and the frontend redirects to the current slug.
+    const idSuffix = !event && String(idOrSlug).match(/-(\d+)$/);
+    if (idSuffix) {
+      [event] = await db.select().from(events).where(eq(events.id, parseInt(idSuffix[1], 10)));
+    }
   }
   if (!event) throw new HTTPException(404, { message: 'Event not found' });
 
@@ -349,13 +386,15 @@ export const updateEvent = async (id: number, data: Record<string, unknown>) => 
     'isFeatured',
     'useExternalForm',
     'externalFormUrl',
+    'certificateEnabled',
   ]);
 
-  // If title is being updated, regenerate slug
+  // A slug chosen in the form wins; without one, a title change regenerates it
   const titleChanged = data.title !== undefined && data.title !== existing.title;
-  if (titleChanged) {
-    // We regenerate slug after update so we have the id already
-  }
+  const customSlug =
+    data.slug !== undefined && data.slug !== null && data.slug !== ''
+      ? await resolveCustomSlug(data.slug, id)
+      : null;
 
   const updateData: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(data)) {
@@ -386,6 +425,10 @@ export const updateEvent = async (id: number, data: Record<string, unknown>) => 
     }
   }
 
+  if (customSlug) {
+    updateData.slug = customSlug;
+  }
+
   if (Object.keys(updateData).length === 0) {
     throw new HTTPException(400, { message: 'No fields to update' });
   }
@@ -398,8 +441,8 @@ export const updateEvent = async (id: number, data: Record<string, unknown>) => 
         .where(and(eq(events.isFeatured, true), ne(events.id, id)));
     }
 
-    // Regenerate slug if title is changing
-    if (titleChanged && typeof updateData.title === 'string') {
+    // Regenerate slug if title is changing and no slug was chosen
+    if (!customSlug && titleChanged && typeof updateData.title === 'string') {
       updateData.slug = generateEventSlug(updateData.title, id);
     }
 

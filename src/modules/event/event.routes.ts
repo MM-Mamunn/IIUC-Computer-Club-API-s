@@ -47,6 +47,7 @@ import {
   toggleFinancesLockController,
   getFixPaymentDetailsController,
   fixPaymentController,
+  slugAvailability,
 } from './event.controller';
 import { initiateSslcommerzPayment, handleSslcommerzIpn } from './sslcommerz.service';
 import type { Context } from 'hono';
@@ -63,6 +64,9 @@ router.get(
   requireRole(await getRolesByPriorityRange(1, 4)),
   registrationStatsController,
 );
+
+// Live check for the slug field in the event form (before /:id)
+router.get('/slug-available', authMiddleware, slugAvailability);
 
 router.get('/:id', getOne);
 

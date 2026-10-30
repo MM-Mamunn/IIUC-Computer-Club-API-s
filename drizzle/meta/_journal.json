@@ -218,6 +218,13 @@
       "when": 1792221145981,
       "tag": "0030_nifty_blazing_skull",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1793374566884,
+      "tag": "0031_certificates_and_slugs",
+      "breakpoints": true
     }
   ]
 }
