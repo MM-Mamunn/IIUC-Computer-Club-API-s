@@ -11,17 +11,15 @@ import {
   type CertificateField,
 } from '../../db/event.schema';
 import { users } from '../../db/schema';
-import { sendCertificateEmail } from '../../utils/email';
 
-const FIELD_TYPES = new Set(['name', 'eventTitle', 'eventDate', 'certificateId', 'custom', 'qr']);
+const FIELD_TYPES = new Set(['name', 'eventTitle', 'eventDate', 'certificateId', 'matrixId', 'custom', 'qr', 'image']);
+/** Field types whose `text` is used: custom text, or the label before an ID */
+const TEXT_FIELD_TYPES = new Set(['custom', 'certificateId', 'matrixId']);
 const MAX_FIELDS = 30;
 const MAX_RECIPIENTS_PER_REQUEST = 2000;
-/** Emails go out one by one through the SMTP queue, so keep each request short */
-const MAX_EMAILS_PER_REQUEST = 20;
+/** Upper bound for one mark-emailed request */
+const MAX_MARK_EMAILED = 500;
 const BACKGROUND_FOLDER = 'ccapi/certificates';
-
-const frontendUrl = () => (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/+$/, '');
-export const certificateLink = (code: string) => `${frontendUrl()}/certificates/verify/${code}`;
 
 // ─── Event checks ───
 
@@ -93,15 +91,25 @@ const sanitizeFields = (raw: unknown): CertificateField[] => {
     if (!FIELD_TYPES.has(type)) throw new HTTPException(400, { message: `Unknown field type "${type}"` });
     const align = field.align === 'left' || field.align === 'right' ? field.align : 'center';
     const color = typeof field.color === 'string' && /^#[0-9a-f]{3,8}$/i.test(field.color) ? field.color : '#111111';
+    // Logos and signatures: must be our own uploads so the canvas can draw them
+    const src = type === 'image' ? cleanString(field.src, 500) : undefined;
+    if (type === 'image' && (!src || !isOwnCloudinaryUrl(src))) {
+      throw new HTTPException(400, { message: 'Upload images through the certificate tool' });
+    }
     return {
       id: cleanString(field.id, 40) || `field-${i + 1}`,
       type,
-      text: type === 'custom' ? cleanString(field.text, 300) ?? '' : undefined,
+      text: TEXT_FIELD_TYPES.has(type) ? cleanString(field.text, 600) : undefined,
+      src,
+      aspect: type === 'image' ? clamp(field.aspect, 0.05, 20, 1) : undefined,
       x: clamp(field.x, 0, 1, 0.5),
       y: clamp(field.y, 0, 1, 0.5),
       size: clamp(field.size, 0.005, 0.5, 0.05),
       fontFamily: cleanString(field.fontFamily, 60),
       fontWeight: cleanString(field.fontWeight, 10),
+      fontStyle: field.fontStyle === 'italic' ? 'italic' : undefined,
+      wrap: type === 'custom' && field.wrap === true ? true : undefined,
+      opacity: field.opacity === undefined ? undefined : clamp(field.opacity, 0.05, 1, 1),
       color,
       align,
       maxWidth: field.maxWidth === undefined ? undefined : clamp(field.maxWidth, 0.05, 1, 0.8),
@@ -361,32 +369,23 @@ export const setCertificateRevoked = async (eventId: number, code: string, revok
 };
 
 /**
- * Email certificate links. Sends at most MAX_EMAILS_PER_REQUEST per call so a
- * request never runs into the serverless time limit; `remaining` tells the
- * caller to call again.
+ * Record that certificates were emailed. The emails themselves go out from the
+ * issuer's own Gmail in the browser (Gmail API), so the API only keeps track.
  */
-export const emailCertificates = async (eventId: number, onlyUnsent: boolean, codes?: unknown) => {
-  const event = await getCertificateEvent(eventId);
-  assertCompleted(event);
-
-  const filters = [eq(certificates.eventId, eventId), isNull(certificates.revokedAt), sql`${certificates.recipientEmail} is not null`];
-  if (onlyUnsent) filters.push(isNull(certificates.emailedAt));
-  if (Array.isArray(codes) && codes.length) filters.push(inArray(certificates.code, codes.map(String)));
-
-  const pending = await db.select().from(certificates).where(and(...filters)).orderBy(asc(certificates.id));
-  const batch = pending.slice(0, MAX_EMAILS_PER_REQUEST);
-
-  const failed: string[] = [];
-  for (const cert of batch) {
-    try {
-      await sendCertificateEmail(cert.recipientEmail!, cert.recipientName, event.title, certificateLink(cert.code));
-      await db.update(certificates).set({ emailedAt: new Date() }).where(eq(certificates.id, cert.id));
-    } catch (err) {
-      console.error(`[certificates] email to ${cert.code} failed:`, err);
-      failed.push(cert.code);
-    }
+export const markCertificatesEmailed = async (eventId: number, codes: unknown) => {
+  if (!Array.isArray(codes) || codes.length === 0) {
+    throw new HTTPException(400, { message: 'codes must be a non-empty array' });
   }
-  return { sent: batch.length - failed.length, failed, remaining: pending.length - batch.length };
+  if (codes.length > MAX_MARK_EMAILED) {
+    throw new HTTPException(400, { message: `Mark at most ${MAX_MARK_EMAILED} certificates at a time` });
+  }
+  await getCertificateEvent(eventId);
+  const updated = await db
+    .update(certificates)
+    .set({ emailedAt: new Date() })
+    .where(and(eq(certificates.eventId, eventId), inArray(certificates.code, codes.map(String)), isNull(certificates.revokedAt)))
+    .returning({ code: certificates.code, emailedAt: certificates.emailedAt });
+  return { updated };
 };
 
 // ─── Public ───

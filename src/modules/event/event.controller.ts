@@ -50,6 +50,35 @@ import { uploadImageToCloudinary } from '../../utils/uploadImage';
 import { cdnCache } from '../../utils/cache';
 import { invalidate } from '../../utils/cache';
 
+const EVENT_IMAGE_KEYS = new Set(['banner', 'thumbnail', 'removeBanner', 'removeThumbnail']);
+
+/**
+ * Event images from the multipart form:
+ * - `banner`: the full poster, shown whole on the event page
+ * - `thumbnail`: optional crop of it for cards and lists
+ * A new poster without a new thumbnail drops the old thumbnail (it was cut
+ * from the previous poster). `removeBanner` / `removeThumbnail` = "true" clear them.
+ */
+async function readEventImages(formData: FormData) {
+  const images: { bannerImage?: string | null; thumbnailImage?: string | null } = {};
+  const upload = async (key: string) => {
+    const file = formData.get(key);
+    return file instanceof File && file.size > 0 ? uploadImageToCloudinary(file) : undefined;
+  };
+  const [banner, thumbnail] = await Promise.all([upload('banner'), upload('thumbnail')]);
+
+  if (banner) {
+    images.bannerImage = banner;
+    images.thumbnailImage = null;
+  } else if (formData.get('removeBanner') === 'true') {
+    images.bannerImage = null;
+    images.thumbnailImage = null;
+  }
+  if (thumbnail) images.thumbnailImage = thumbnail;
+  else if (formData.get('removeThumbnail') === 'true') images.thumbnailImage = null;
+  return images;
+}
+
 export const create = async (c: Context) => {
   const contentType = c.req.header('content-type') ?? '';
 
@@ -109,11 +138,8 @@ export const create = async (c: Context) => {
       }
     }
 
-    // Handle banner upload
-    const bannerFile = formData.get('banner') as File | null;
-    if (bannerFile && bannerFile.size > 0) {
-      data.bannerImage = await uploadImageToCloudinary(bannerFile);
-    }
+    // Handle banner (full poster) and optional card thumbnail uploads
+    Object.assign(data, await readEventImages(formData));
   } else {
     data = await c.req.json();
   }
@@ -161,7 +187,7 @@ export const update = async (c: Context) => {
     const formData = await c.req.formData();
     data = {};
     for (const [key, value] of formData.entries()) {
-      if (key === 'banner') continue; // handle separately
+      if (EVENT_IMAGE_KEYS.has(key)) continue; // handled by readEventImages
       if (key === 'paymentNumbers') {
         try {
           data.paymentNumbers = JSON.parse(value as string);
@@ -214,10 +240,7 @@ export const update = async (c: Context) => {
       data[key] = value || undefined;
     }
 
-    const bannerFile = formData.get('banner') as File | null;
-    if (bannerFile && bannerFile.size > 0) {
-      data.bannerImage = await uploadImageToCloudinary(bannerFile);
-    }
+    Object.assign(data, await readEventImages(formData));
   } else {
     data = await c.req.json();
   }

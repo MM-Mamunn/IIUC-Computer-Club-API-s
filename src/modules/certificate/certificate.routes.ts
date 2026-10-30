@@ -11,7 +11,7 @@ import {
   issue,
   list,
   revoke,
-  email,
+  markEmailed,
   verify,
   mine,
 } from './certificate.controller';
@@ -34,7 +34,8 @@ router.put('/events/:eventId/template', authMiddleware, managers, saveTemplate);
 router.get('/events/:eventId/recipients', authMiddleware, managers, registeredRecipients);
 router.get('/events/:eventId/certificates', authMiddleware, managers, list);
 router.post('/events/:eventId/certificates', authMiddleware, managers, issue);
-router.post('/events/:eventId/certificates/email', authMiddleware, managers, email);
+// Emails are sent from the issuer's Gmail in the browser; this records which went out
+router.post('/events/:eventId/certificates/emailed', authMiddleware, managers, markEmailed);
 router.put('/events/:eventId/certificates/:code/revoke', authMiddleware, managers, revoke);
 
 export default router;

@@ -59,8 +59,11 @@ export const events = pgTable('events', {
   /** Max participants (null = unlimited) */
   maxParticipants: integer('max_participants'),
 
-  /** Event banner/image URL */
+  /** Event banner/image URL: the full poster, shown whole on the event page */
   bannerImage: text('banner_image'),
+
+  /** Optional crop of the poster for cards and lists; falls back to bannerImage */
+  thumbnailImage: text('thumbnail_image'),
 
   /** Event status */
   status: varchar('status', { length: 20 }).notNull().default('upcoming'),
@@ -511,10 +514,17 @@ export const refundRequests = pgTable(
  */
 export type CertificateField = {
   id: string;
-  /** name | eventTitle | eventDate | certificateId | custom | qr */
+  /** name | eventTitle | eventDate | certificateId | matrixId | custom | qr | image */
   type: string;
-  /** Text for `custom` fields */
+  /** Text for `custom` fields ({name}, {event}, {date}, {id}, {matrixId} are filled in), or the label before an ID */
   text?: string;
+  /** `image` fields: Cloudinary URL and width / height */
+  src?: string;
+  aspect?: number;
+  fontStyle?: 'italic';
+  /** Custom text wraps onto several lines within maxWidth */
+  wrap?: boolean;
+  opacity?: number;
   /** Centre point of the element */
   x: number;
   y: number;

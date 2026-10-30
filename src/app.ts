@@ -26,13 +26,20 @@ const ALLOWED_ORIGINS = [
   'http://localhost:3000',
 ];
 
+// Netlify deploy previews and branch deploys, e.g. deploy-preview-4--iiuccomputerclub.netlify.app
+const NETLIFY_PREVIEW_ORIGIN = /^https:\/\/[a-z0-9-]+--iiuccomputerclub\.netlify\.app$/;
+
 app.use(
   '/*',
   cors({
-    origin: (origin) => (ALLOWED_ORIGINS.includes(origin) ? origin : ''),
+    origin: (origin) =>
+      ALLOWED_ORIGINS.includes(origin) || NETLIFY_PREVIEW_ORIGIN.test(origin) ? origin : '',
     allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
+    // The site calls the API straight from the browser; let it cache the
+    // preflight (browsers cap this at 2h) instead of sending one per request
+    maxAge: 7200,
   }),
 );
 

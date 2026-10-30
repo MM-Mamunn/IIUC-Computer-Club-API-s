@@ -9,7 +9,7 @@ import {
   issueCertificates,
   listCertificates,
   setCertificateRevoked,
-  emailCertificates,
+  markCertificatesEmailed,
   verifyCertificate,
   getMyCertificates,
 } from './certificate.service';
@@ -52,9 +52,9 @@ export const revoke = async (c: Context) => {
   return c.json({ certificate }, 200);
 };
 
-export const email = async (c: Context) => {
-  const { onlyUnsent = true, codes } = await c.req.json().catch(() => ({}));
-  return c.json(await emailCertificates(eventIdParam(c), onlyUnsent !== false, codes), 200);
+export const markEmailed = async (c: Context) => {
+  const { codes } = await c.req.json().catch(() => ({}));
+  return c.json(await markCertificatesEmailed(eventIdParam(c), codes), 200);
 };
 
 export const verify = async (c: Context) => {

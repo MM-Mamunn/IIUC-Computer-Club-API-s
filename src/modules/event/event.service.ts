@@ -87,6 +87,7 @@ export const createEvent = async (
     fee?: number;
     maxParticipants?: number;
     bannerImage?: string;
+    thumbnailImage?: string;
     paymentNumbers?: { bkash?: string[]; nagad?: string[] };
     sslcommerzEnabled?: boolean;
     customFields?: unknown;
@@ -153,6 +154,7 @@ export const createEvent = async (
         fee,
         maxParticipants: data.maxParticipants ?? null,
         bannerImage: data.bannerImage ?? null,
+        thumbnailImage: data.thumbnailImage ?? null,
         status: 'upcoming',
         paymentNumbers,
         sslcommerzEnabled,
@@ -237,6 +239,7 @@ export const listEvents = (committeeNumber?: string, status?: string, gender?: s
           fee: events.fee,
           maxParticipants: events.maxParticipants,
           bannerImage: events.bannerImage,
+          thumbnailImage: events.thumbnailImage,
           status: events.status,
           isFeatured: events.isFeatured,
           paymentNumbers: events.paymentNumbers,
@@ -282,6 +285,7 @@ export const listEvents = (committeeNumber?: string, status?: string, gender?: s
         fee: events.fee,
         maxParticipants: events.maxParticipants,
         bannerImage: events.bannerImage,
+        thumbnailImage: events.thumbnailImage,
         status: events.status,
         isFeatured: events.isFeatured,
         paymentNumbers: events.paymentNumbers,
@@ -375,6 +379,7 @@ export const updateEvent = async (id: number, data: Record<string, unknown>) => 
     'fee',
     'maxParticipants',
     'bannerImage',
+    'thumbnailImage',
     'status',
     'paymentNumbers',
     'sslcommerzEnabled',
@@ -1639,6 +1644,7 @@ export const getMyManagedEvents = async (userId: string) => {
       venue: events.venue,
       status: events.status,
       bannerImage: events.bannerImage,
+      thumbnailImage: events.thumbnailImage,
       isPaid: events.isPaid,
       fee: events.fee,
       assignedAt: eventManagers.assignedAt,

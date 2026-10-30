@@ -319,59 +319,61 @@ export const showMe = async (c: Context) => {
     throw new HTTPException(400, { message: 'User ID required' });
   }
 
-  const [me] = await db
-    .select({
-      id: users.id,
-      name: users.name,
-      email: users.email,
-      gender: users.gender,
-      profileImage: users.profileImage,
-      idCard: users.idCard,
-      department: users.department,
-      description: users.description,
-      githubUrl: users.githubUrl,
-      linkedinUrl: users.linkedinUrl,
-      facebookUrl: users.facebookUrl,
-      twitterUrl: users.twitterUrl,
-      batch: users.batch,
-      createdAt: users.createdAt,
-    })
-    .from(users)
-    .where(eq(users.id, user.id));
+  // Independent lookups: run them together instead of one after another
+  const [[me], activeComms, tenures] = await Promise.all([
+    db
+      .select({
+        id: users.id,
+        name: users.name,
+        email: users.email,
+        gender: users.gender,
+        profileImage: users.profileImage,
+        idCard: users.idCard,
+        department: users.department,
+        description: users.description,
+        githubUrl: users.githubUrl,
+        linkedinUrl: users.linkedinUrl,
+        facebookUrl: users.facebookUrl,
+        twitterUrl: users.twitterUrl,
+        batch: users.batch,
+        createdAt: users.createdAt,
+      })
+      .from(users)
+      .where(eq(users.id, user.id)),
+    // Active committee numbers
+    showActive(),
+    // All past and present committee tenures for this user
+    db
+      .select({
+        committeeNumber: executives.number,
+        session: committee.session,
+        position: executives.position,
+        role: executives.role,
+        isActive: committee.isActive,
+        end: committee.end,
+        designation: committeeSubmissions.designation,
+        subBatch: committeeSubmissions.batch,
+        subSkills: committeeSubmissions.skills,
+        subPortfolio: committeeSubmissions.portfolioUrl,
+      })
+      .from(executives)
+      .innerJoin(committee, eq(executives.number, committee.number))
+      .leftJoin(
+        committeeSubmissions,
+        and(
+          eq(committeeSubmissions.matrixId, executives.id),
+          eq(committeeSubmissions.committeeNumber, executives.number),
+        ),
+      )
+      .where(eq(executives.id, user.id))
+      .orderBy(desc(committee.start)),
+  ]);
 
   if (!me) {
     throw new HTTPException(404, { message: 'User not found' });
   }
 
-  // 1. Fetch active committee numbers
-  const activeComms = await showActive();
   const activeNumbers = new Set(activeComms.map((a) => a.number));
-
-  // 2. Query all historical and present committee tenures for this user
-  const tenures = await db
-    .select({
-      committeeNumber: executives.number,
-      session: committee.session,
-      position: executives.position,
-      role: executives.role,
-      isActive: committee.isActive,
-      end: committee.end,
-      designation: committeeSubmissions.designation,
-      subBatch: committeeSubmissions.batch,
-      subSkills: committeeSubmissions.skills,
-      subPortfolio: committeeSubmissions.portfolioUrl,
-    })
-    .from(executives)
-    .innerJoin(committee, eq(executives.number, committee.number))
-    .leftJoin(
-      committeeSubmissions,
-      and(
-        eq(committeeSubmissions.matrixId, executives.id),
-        eq(committeeSubmissions.committeeNumber, executives.number),
-      ),
-    )
-    .where(eq(executives.id, user.id))
-    .orderBy(desc(committee.start));
 
   // Determine active present tenure (first matching active committee, or fallback to latest)
   const activeTenure =
