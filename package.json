@@ -37,6 +37,7 @@
     "db:seed-dmau": "bun run src/scripts/seed-dmau.ts",
     "db:seed-female": "bun run src/scripts/seed-female-committee.ts",
     "db:seed-massive": "bun run src/scripts/seed-massive.ts",
+    "db:migrate-images": "node node_modules/tsx/dist/cli.mjs src/scripts/migrate-base64-images.ts",
     "start": "vercel dev",
     "deploy": "vercel",
     "vercel-build": "esbuild src/vercel.ts --bundle --outfile=api/index.mjs --platform=node --target=node18 --format=esm --banner:js=\"import{createRequire}from'module';const require=createRequire(import.meta.url);\""

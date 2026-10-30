@@ -9,6 +9,7 @@ import { showActive, mapDesignationToRole } from '../committee/committee.service
 import { invalidate } from '../../utils/cache';
 import { sendPasswordResetEmail } from '../../utils/email';
 import jwt from 'jsonwebtoken';
+import { resolveImageInput } from '../../utils/uploadImage';
 
 export const registerUser = async (
   id: string,
@@ -67,6 +68,9 @@ export const registerUser = async (
   }
 
   const hashed = await hashPassword(password);
+
+  // Base64 photos bloat every members response; store only the Cloudinary URL
+  profileImage = await resolveImageInput(profileImage);
 
   const [newUser] = await db
     .insert(users)
@@ -468,6 +472,9 @@ export const updateUser = async (data: UpdateUserInput, c: Context) => {
   if (!user.id) {
     throw new HTTPException(400, { message: 'User id is required' });
   }
+
+  // Base64 photos bloat every members response; store only the Cloudinary URL
+  userFields.profileImage = await resolveImageInput(userFields.profileImage);
 
   if (portfolioUrl !== undefined && userFields.twitterUrl === undefined) {
     userFields.twitterUrl = portfolioUrl;
