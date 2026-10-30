@@ -1,16 +1,19 @@
 import type { Context } from "hono";
 import {  showPositions, showRoles } from "./general.service";
+import { cdnCache } from "../../utils/cache";
 
 export const positions = async (c: Context) => {
   const pos = await showPositions();
 
-  return c.json({ pos }, 201);
+  cdnCache(c, 300);
+  return c.json({ pos }, 200);
 };
 
 
 export const roles = async (c: Context) => {
   const role = await showRoles();
 
-  return c.json({ role }, 201);
+  cdnCache(c, 300);
+  return c.json({ role }, 200);
 };
 

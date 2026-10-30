@@ -2,6 +2,7 @@
  * Simple in-memory TTL cache for server-level caching.
  * No external dependencies (no Redis). Data lives in process memory.
  */
+import type { Context } from 'hono';
 
 interface CacheEntry<T> {
   data: T;
@@ -23,6 +24,16 @@ export async function cached<T>(key: string, ttlMs: number, fn: () => Promise<T>
   const data = await fn();
   store.set(key, { data, expiry: Date.now() + ttlMs });
   return data;
+}
+
+/**
+ * Let Vercel's CDN serve a public GET response for `sMaxAge` seconds, then
+ * keep serving the stale copy for `staleFor` seconds while it refreshes.
+ * Only for responses that are the same for every visitor. Requests carrying
+ * an Authorization header bypass the CDN cache, so signed-in users see fresh data.
+ */
+export function cdnCache(c: Context, sMaxAge: number, staleFor = sMaxAge * 2) {
+  c.header('Cache-Control', `public, s-maxage=${sMaxAge}, stale-while-revalidate=${staleFor}`);
 }
 
 /**
