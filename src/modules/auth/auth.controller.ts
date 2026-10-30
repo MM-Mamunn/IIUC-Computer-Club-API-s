@@ -11,7 +11,7 @@ import {
   forgotPassword,
   resetPassword,
 } from './auth.service';
-import { uploadImageToCloudinary } from '../../utils/uploadImage';
+import { uploadImageToCloudinary, PROFILE_PHOTO_UPLOAD } from '../../utils/uploadImage';
 
 export const register = async (c: Context) => {
   const {
@@ -105,7 +105,7 @@ export const uploadImage = async (c: Context) => {
   }
 
   try {
-    const imageUrl = await uploadImageToCloudinary(file);
+    const imageUrl = await uploadImageToCloudinary(file, PROFILE_PHOTO_UPLOAD);
 
     const url = await saveImage(imageUrl, c);
     return c.json(url);

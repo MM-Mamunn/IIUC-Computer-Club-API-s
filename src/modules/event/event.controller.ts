@@ -46,6 +46,7 @@ import {
   autoUpdateEventStatuses,
 } from './event.service';
 import { uploadImageToCloudinary } from '../../utils/uploadImage';
+import { cdnCache } from '../../utils/cache';
 import { invalidate } from '../../utils/cache';
 
 export const create = async (c: Context) => {
@@ -127,6 +128,8 @@ export const list = async (c: Context) => {
   const status = c.req.query('status');
   const gender = c.req.query('gender');
   const eventsList = await listEvents(committeeNumber, status, gender);
+  // Registration counts change often, so keep the CDN copy short
+  cdnCache(c, 60);
   return c.json({ events: eventsList }, 200);
 };
 
@@ -134,6 +137,7 @@ export const getOne = async (c: Context) => {
   const idParam = c.req.param('id');
   // Accept either a slug string or a numeric id (backward compat)
   const event = await getEventById(idParam);
+  cdnCache(c, 60);
   return c.json({ event }, 200);
 };
 

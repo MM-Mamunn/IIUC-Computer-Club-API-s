@@ -9,7 +9,7 @@ import { showActive, mapDesignationToRole } from '../committee/committee.service
 import { invalidate } from '../../utils/cache';
 import { sendPasswordResetEmail } from '../../utils/email';
 import jwt from 'jsonwebtoken';
-import { resolveImageInput } from '../../utils/uploadImage';
+import { resolveImageInput, PROFILE_PHOTO_UPLOAD } from '../../utils/uploadImage';
 
 export const registerUser = async (
   id: string,
@@ -70,7 +70,7 @@ export const registerUser = async (
   const hashed = await hashPassword(password);
 
   // Base64 photos bloat every members response; store only the Cloudinary URL
-  profileImage = await resolveImageInput(profileImage);
+  profileImage = await resolveImageInput(profileImage, PROFILE_PHOTO_UPLOAD);
 
   const [newUser] = await db
     .insert(users)
@@ -474,7 +474,7 @@ export const updateUser = async (data: UpdateUserInput, c: Context) => {
   }
 
   // Base64 photos bloat every members response; store only the Cloudinary URL
-  userFields.profileImage = await resolveImageInput(userFields.profileImage);
+  userFields.profileImage = await resolveImageInput(userFields.profileImage, PROFILE_PHOTO_UPLOAD);
 
   if (portfolioUrl !== undefined && userFields.twitterUrl === undefined) {
     userFields.twitterUrl = portfolioUrl;

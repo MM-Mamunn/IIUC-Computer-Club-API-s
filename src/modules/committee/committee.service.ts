@@ -10,6 +10,8 @@ import {
   isBase64Image,
   uploadDataUriToCloudinary,
   resolveImageInput,
+  PROFILE_PHOTO_UPLOAD,
+  toAvatarUrl,
 } from '../../utils/uploadImage';
 import { hashPassword } from '../../utils/hash';
 import { generateToken } from '../../utils/jwt';
@@ -290,7 +292,7 @@ export const showMembers = async (number: string) => {
         if (!isBase64Image(r.profileImage)) return;
         const legacy = r.profileImage;
         try {
-          const url = await uploadDataUriToCloudinary(legacy);
+          const url = await uploadDataUriToCloudinary(legacy, PROFILE_PHOTO_UPLOAD);
           await db.update(users).set({ profileImage: url }).where(eq(users.id, r.id));
           await db
             .update(committeeSubmissions)
@@ -444,7 +446,7 @@ export const showMembers = async (number: string) => {
         name: r.name,
         email: r.email,
         gender: r.gender,
-        profileImage: r.profileImage,
+        profileImage: toAvatarUrl(r.profileImage),
         role: r.role,
         position: formattedPosition,
         designation: formattedPosition,
@@ -570,13 +572,13 @@ export const submitCommitteeApplication = async (data: CommitteeSubmissionInput)
   if (data.photo && typeof data.photo === 'object' && 'arrayBuffer' in data.photo) {
     const file = data.photo as File;
     if (file.size > 0) {
-      photoUrl = await uploadImageToCloudinary(file);
+      photoUrl = await uploadImageToCloudinary(file, PROFILE_PHOTO_UPLOAD);
     }
   } else if (typeof data.photo === 'string' && data.photo.trim().length > 0) {
     photoUrl = data.photo.trim();
   }
   // Base64 photos bloat every members response; store only the Cloudinary URL
-  photoUrl = await resolveImageInput(photoUrl);
+  photoUrl = await resolveImageInput(photoUrl, PROFILE_PHOTO_UPLOAD);
 
   const autoApprove = (process.env.COMMITTEE_AUTO_APPROVE ?? 'true').toLowerCase() === 'true';
   const effectiveStatus = autoApprove ? 'approved' : 'pending';

@@ -6,7 +6,7 @@ import 'dotenv/config';
 import { eq, like } from 'drizzle-orm';
 import { db } from '../config/db';
 import { users, committeeSubmissions } from '../db/schema';
-import { uploadDataUriToCloudinary } from '../utils/uploadImage';
+import { uploadDataUriToCloudinary, PROFILE_PHOTO_UPLOAD } from '../utils/uploadImage';
 
 const dryRun = process.argv.includes('--dry-run');
 const BASE64_PATTERN = 'data:image/%';
@@ -17,7 +17,7 @@ const main = async () => {
   const toUrl = async (dataUri: string) => {
     const existing = uploaded.get(dataUri);
     if (existing) return existing;
-    const url = await uploadDataUriToCloudinary(dataUri);
+    const url = await uploadDataUriToCloudinary(dataUri, PROFILE_PHOTO_UPLOAD);
     uploaded.set(dataUri, url);
     return url;
   };

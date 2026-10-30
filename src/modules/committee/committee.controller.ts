@@ -10,6 +10,7 @@ import {
   getCommitteeSubmissionByMatrixId,
   getAllCommitteeSubmissions,
 } from './committee.service';
+import { cdnCache } from '../../utils/cache';
 
 // committee.controller.ts
 type CommitteeBody = {
@@ -38,7 +39,8 @@ export const newCommittee = async (c: Context) => {
 export const activeCommittees = async (c: Context) => {
   const active = await showActive();
 
-  return c.json({ active }, 201);
+  cdnCache(c, 300);
+  return c.json({ active }, 200);
 };
 
 export const positions = async (c: Context) => {
@@ -49,6 +51,7 @@ export const positions = async (c: Context) => {
 
 export const allCommittees = async (c: Context) => {
   const all = await showAllCommittees();
+  cdnCache(c, 300);
   return c.json({ committees: all }, 200);
 };
 
@@ -64,7 +67,7 @@ export const members = async (c: Context) => {
   const number = c.req.param('number');
   const membersList = await showMembers(number);
   // Let Vercel's CDN serve repeat visits instead of invoking the function every time
-  c.header('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=600');
+  cdnCache(c, 300);
   return c.json({ members: membersList }, 200);
 };
 
