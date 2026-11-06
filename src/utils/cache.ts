@@ -33,6 +33,9 @@ export async function cached<T>(key: string, ttlMs: number, fn: () => Promise<T>
  * an Authorization header bypass the CDN cache, so signed-in users see fresh data.
  */
 export function cdnCache(c: Context, sMaxAge: number, staleFor = sMaxAge * 2) {
+  // The website's server asks with ?fresh=1 when it rebuilds a page after an edit.
+  // It has its own cache, so it must never be handed the CDN's stale copy.
+  if (c.req.query('fresh')) return;
   c.header('Cache-Control', `public, s-maxage=${sMaxAge}, stale-while-revalidate=${staleFor}`);
 }
 

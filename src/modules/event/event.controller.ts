@@ -158,7 +158,7 @@ export const list = async (c: Context) => {
   const gender = c.req.query('gender');
   const eventsList = await listEvents(committeeNumber, status, gender);
   // Registration counts change often, so keep the CDN copy short
-  cdnCache(c, 60);
+  cdnCache(c, 60, 0);
   return c.json({ events: eventsList }, 200);
 };
 
@@ -172,7 +172,7 @@ export const getOne = async (c: Context) => {
   const idParam = c.req.param('id');
   // Accept either a slug string or a numeric id (backward compat)
   const event = await getEventById(idParam);
-  cdnCache(c, 60);
+  cdnCache(c, 60, 0);
   return c.json({ event }, 200);
 };
 
