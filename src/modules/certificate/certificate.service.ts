@@ -249,8 +249,16 @@ const newCode = (eventId: number) => {
   return `CC${eventId}-${random}`;
 };
 
+/** "abdullah al SHAIMON" -> "Abdullah Al Shaimon"; names that mix cases on purpose (McDonald) are kept */
+const formatPersonName = (name: string) =>
+  name.replace(/[\p{L}][\p{L}'’]*/gu, (part) =>
+    part === part.toLowerCase() || part === part.toUpperCase()
+      ? part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()
+      : part,
+  );
+
 const normalizeRecipient = (r: RecipientInput) => {
-  const name = String(r.name ?? '').replace(/\s+/g, ' ').trim().slice(0, 255);
+  const name = formatPersonName(String(r.name ?? '').replace(/\s+/g, ' ').trim()).slice(0, 255);
   const emailRaw = String(r.email ?? '').trim().toLowerCase();
   const email = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailRaw) ? emailRaw.slice(0, 255) : null;
   const matrixId = String(r.matrixId ?? '').replace(/\s+/g, '').toUpperCase().slice(0, 50) || null;
