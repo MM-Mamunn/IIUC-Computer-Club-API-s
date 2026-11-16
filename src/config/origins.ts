@@ -8,7 +8,9 @@ export const ALLOWED_ORIGINS = [
   'https://www.iiuccomputerclub.netlify.app',
   'https://iiuc-computer-club-one.vercel.app',
   'https://www.iiuc-computer-club-one.vercel.app',
-  'http://localhost:3000',
+  // Local development only. In production this would let a reset email link
+  // to whatever runs on the user's own machine.
+  ...(process.env.VERCEL_ENV === 'production' ? [] : ['http://localhost:3000']),
 ];
 
 // Netlify deploy previews and branch deploys, e.g. deploy-preview-4--iiuccomputerclub.netlify.app

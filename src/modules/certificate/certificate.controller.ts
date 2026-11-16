@@ -48,7 +48,7 @@ export const list = async (c: Context) => c.json({ certificates: await listCerti
 
 export const revoke = async (c: Context) => {
   const { revoked } = await c.req.json().catch(() => ({ revoked: true }));
-  const certificate = await setCertificateRevoked(eventIdParam(c), c.req.param('code'), revoked !== false);
+  const certificate = await setCertificateRevoked(eventIdParam(c), c.req.param('code') ?? '', revoked !== false);
   return c.json({ certificate }, 200);
 };
 
@@ -58,7 +58,7 @@ export const markEmailed = async (c: Context) => {
 };
 
 export const verify = async (c: Context) => {
-  const certificate = await verifyCertificate(c.req.param('code'));
+  const certificate = await verifyCertificate(c.req.param('code') ?? '');
   // Short CDN copy so a revocation shows up within a minute
   cdnCache(c, 60);
   return c.json({ certificate }, 200);

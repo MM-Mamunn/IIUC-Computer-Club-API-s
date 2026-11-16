@@ -1,4 +1,5 @@
 // committee.service.ts
+import { cleanLinks } from '../../utils/safe-link';
 import type { Context } from 'hono';
 import { db } from '../../config/db';
 import { committee, executives, users, committeeSubmissions, roles, positions } from '../../db/schema';
@@ -538,7 +539,15 @@ export const canSelfAssignRole = async (role: string, userId: string, commNumber
   return current?.role === role;
 };
 
+/**
+ * Whether the new-committee form takes new members. Closed unless
+ * COMMITTEE_INTAKE_OPEN=true (set it on Vercel for the next intake).
+ */
+export const isIntakeOpen = () =>
+  (process.env.COMMITTEE_INTAKE_OPEN ?? 'false').toLowerCase() === 'true';
+
 export const submitCommitteeApplication = async (data: CommitteeSubmissionInput) => {
+  cleanLinks(data);
   const name = data.name?.trim();
   const designation = data.designation?.trim();
   const matrixId = data.matrixId?.trim().toUpperCase();
@@ -590,6 +599,35 @@ export const submitCommitteeApplication = async (data: CommitteeSubmissionInput)
     throw new HTTPException(400, {
       message: `Committee '${commNumber}' does not exist in the committee table.`,
     });
+  }
+
+  // Outside an intake period this form only lets existing members of that
+  // committee update their details; nobody can add themselves to it.
+  // Set COMMITTEE_INTAKE_OPEN=true for the next committee's intake.
+  const intakeOpen = isIntakeOpen();
+  let memberRole: string | null = null;
+  if (!intakeOpen) {
+    const [membership] = data.callerId
+      ? await db
+          .select({ id: executives.id, role: executives.role })
+          .from(executives)
+          .where(and(eq(executives.id, data.callerId), eq(executives.number, commNumber)))
+      : [];
+    if (!membership) {
+      throw new HTTPException(403, {
+        message:
+          'The committee intake is closed. New members are added by the committee, so please contact the President or General Secretary.',
+      });
+    }
+    memberRole = membership.role;
+    // Refuse before writing anything, so a member's approved entry is never
+    // replaced by a pending one with a title they don't hold.
+    if (mapDesignationToRole(designation) !== memberRole) {
+      throw new HTTPException(403, {
+        message:
+          'You can change your title within your current role only. A different role is assigned by the committee.',
+      });
+    }
   }
 
   // Handle photo upload
@@ -696,8 +734,11 @@ export const submitCommitteeApplication = async (data: CommitteeSubmissionInput)
 
     const roleName = mapDesignationToRole(designation);
 
-    // Officer roles wait for the President; ordinary member roles follow auto-approve
-    const roleAllowed = await canSelfAssignRole(roleName, targetUserId, commNumber);
+    // Officer roles wait for the President; ordinary member roles follow auto-approve.
+    // Outside an intake a member may only retitle within the role they hold.
+    const roleAllowed = intakeOpen
+      ? await canSelfAssignRole(roleName, targetUserId, commNumber)
+      : roleName === memberRole;
     const status = roleAllowed ? effectiveStatus : 'pending';
 
     // c. Upsert executives (only approved submissions create or keep the executives row)

@@ -58,7 +58,7 @@ export const allCommittees = async (c: Context) => {
 };
 
 export const close = async (c: Context) => {
-  const number = c.req.param('number');
+  const number = c.req.param('number') ?? '';
   const { endDate } = await c.req.json();
   const user = c.get('user');
   const committee = await closeCommittee(number, endDate, user?.id);
@@ -66,7 +66,7 @@ export const close = async (c: Context) => {
 };
 
 export const members = async (c: Context) => {
-  const number = c.req.param('number');
+  const number = c.req.param('number') ?? '';
   const membersList = await showMembers(number);
   // Let Vercel's CDN serve repeat visits instead of invoking the function every time
   cdnCache(c, 300);
@@ -116,7 +116,7 @@ export const createSubmission = async (c: Context) => {
 };
 
 export const getSubmission = async (c: Context) => {
-  const matrixId = c.req.param('matrixId');
+  const matrixId = c.req.param('matrixId') ?? '';
   // Members may read their own submission; committee admins may read anyone's
   const user = c.get('user');
   const admins = await getRolesByPriorityRange(1, 4);

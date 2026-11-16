@@ -19,6 +19,7 @@ import { requireRole } from '../../middlewares/role.middleware';
 import { authMiddleware, optionalAuthMiddleware } from '../../middlewares/auth.middleware';
 import { rateLimiter } from '../../middlewares/rate-limit.middleware';
 import { getRolesByPriorityRange } from '../global/global.service';
+import { isIntakeOpen } from './committee.service';
 
 const router = new Hono();
 
@@ -29,6 +30,9 @@ router.get('/active', activeCommittees);
 router.get('/all', allCommittees);
 
 // ─── Public/Authenticated Committee Member Applications ───
+// Lets the form say up front whether it's taking new members
+router.get('/intake', (c) => c.json({ open: isIntakeOpen() }));
+
 router.post(
   '/submission',
   rateLimiter({ windowMs: 15 * 60 * 1000, max: 30, keyPrefix: 'committee-sub' }),

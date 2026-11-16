@@ -11,11 +11,12 @@ import {
 import { getRolesByPriorityRange } from '../global/global.service';
 import { HTTPException } from 'hono/http-exception';
 import type { Context } from 'hono';
-import { showActive, mapDesignationToRole, canSelfAssignRole } from '../committee/committee.service';
+import { showActive, mapDesignationToRole } from '../committee/committee.service';
 import { invalidate } from '../../utils/cache';
 import { sendPasswordResetEmail } from '../../utils/email';
 import jwt from 'jsonwebtoken';
 import { resolveFrontendUrl } from '../../config/origins';
+import { cleanLink, cleanLinks } from '../../utils/safe-link';
 import { runAfterResponse } from '../../utils/background';
 import { resolveImageInput, PROFILE_PHOTO_UPLOAD } from '../../utils/uploadImage';
 
@@ -39,6 +40,10 @@ export const registerUser = async (
   committeeNumber?: string,
   session?: string,
 ) => {
+  githubUrl = cleanLink(githubUrl);
+  linkedinUrl = cleanLink(linkedinUrl);
+  facebookUrl = cleanLink(facebookUrl);
+  twitterUrl = cleanLink(twitterUrl);
   if (id.trim() !== id) {
     throw new HTTPException(400, { message: 'ID cannot contain leading or trailing spaces' });
   }
@@ -48,6 +53,11 @@ export const registerUser = async (
   id = id.toUpperCase();
   if (id.length < 2) {
     throw new HTTPException(400, { message: 'ID must be at least 2 characters long' });
+  }
+  // Student IDs always contain digits; letters-only IDs (initials) are kept
+  // for Teachers Body accounts, which the committee creates
+  if (!/\d/.test(id)) {
+    throw new HTTPException(400, { message: 'Please use your university Matrix ID (e.g. C221046)' });
   }
   if (gender !== 'male' && gender !== 'female') {
     throw new HTTPException(400, { message: "Please specify your gender as 'male' or 'female'" });
@@ -112,9 +122,11 @@ export const registerUser = async (
         : JSON.stringify(skills)
       : null;
 
-    // A claimed officer designation stays pending until the President assigns the role
-    const officerRoles = await getRolesByPriorityRange(1, 5);
-    const claimsOfficerRole = officerRoles.includes(mapDesignationToRole(designation || ''));
+    // Signing up doesn't make anyone a committee member: designations and
+    // committees are given by the committee (Add Role), so any sent here are ignored
+    void designation;
+    void committeeNumber;
+    void session;
 
     const [existingSub] = await db
       .select()
@@ -127,11 +139,8 @@ export const registerUser = async (
         .update(committeeSubmissions)
         .set({
           name,
-          designation: designation || existingSub.designation || 'General Member',
           batch: batch || existingSub.batch,
           email,
-          committeeNumber: committeeNumber !== undefined ? committeeNumber : existingSub.committeeNumber,
-          session: session !== undefined ? session : existingSub.session,
           photoUrl: profileImage || existingSub.photoUrl,
           bio: description || existingSub.bio,
           skills: formattedSkills || existingSub.skills,
@@ -139,19 +148,18 @@ export const registerUser = async (
           linkedinUrl: linkedinUrl || existingSub.linkedinUrl,
           facebookUrl: facebookUrl || existingSub.facebookUrl,
           portfolioUrl: twitterUrl || existingSub.portfolioUrl,
-          ...(claimsOfficerRole ? { status: 'pending' } : {}),
           updatedAt: new Date(),
         })
         .where(eq(committeeSubmissions.id, existingSub.id));
     } else {
       await db.insert(committeeSubmissions).values({
         name,
-        designation: designation || 'General Member',
+        designation: 'General Member',
         matrixId: id,
         batch: batch || 'General',
         email,
-        committeeNumber: committeeNumber || null,
-        session: session || null,
+        committeeNumber: null,
+        session: null,
         photoUrl: profileImage || null,
         bio: description || null,
         skills: formattedSkills,
@@ -159,7 +167,7 @@ export const registerUser = async (
         githubUrl: githubUrl || null,
         linkedinUrl: linkedinUrl || null,
         facebookUrl: facebookUrl || null,
-        status: claimsOfficerRole ? 'pending' : 'approved',
+        status: 'approved',
       });
     }
   } catch (err) {
@@ -254,6 +262,41 @@ function invalidateUserCaches() {
   invalidate('users:');
   invalidate('dashboard:');
 }
+
+/**
+ * Who may edit what on their own profile.
+ * - faculty: the Teachers Body, i.e. anyone holding a President, Vice
+ *   President or Treasurer role. That role is assigned, and they have no
+ *   batch, skills or student email.
+ * - member: holds a role in an active committee, so may keep their committee
+ *   details (designation, skills) up to date.
+ * - student: everyone else. Basic profile only; joining the committee goes
+ *   through the committee (Add Role), not the profile form.
+ */
+export type ProfileKind = 'faculty' | 'member' | 'student';
+
+export const resolveProfileAccess = async (
+  userId: string,
+  tenures?: Array<{ committeeNumber: string; role: string | null }>,
+) => {
+  const [facultyRoles, active, rows] = await Promise.all([
+    getRolesByPriorityRange(1, 2),
+    showActive(),
+    tenures
+      ? Promise.resolve(tenures)
+      : db
+          .select({ committeeNumber: executives.number, role: executives.role })
+          .from(executives)
+          .where(eq(executives.id, userId)),
+  ]);
+  const activeNumbers = new Set(active.map((a) => a.number));
+  const memberOf = rows.filter((r) => activeNumbers.has(r.committeeNumber)).map((r) => r.committeeNumber);
+  // Decided by an assigned role only, never by the shape of the ID, so nobody
+  // can make themselves "faculty" by signing up with a letters-only ID
+  const isFaculty = rows.some((r) => facultyRoles.includes(r.role ?? ''));
+  const kind: ProfileKind = isFaculty ? 'faculty' : memberOf.length > 0 ? 'member' : 'student';
+  return { kind, memberOf };
+};
 
 export const showMe = async (c: Context) => {
   const user = c.get('user');
@@ -379,8 +422,12 @@ export const showMe = async (c: Context) => {
   const primaryBatch =
     me.batch || activeTenure?.subBatch || fallbackSub?.batch || null;
 
+  const access = await resolveProfileAccess(userId, tenures);
+
   return {
     ...me,
+    profileKind: access.kind,
+    memberCommittees: access.memberOf,
     batch: primaryBatch,
     skills: skillsList,
     designation: primaryDesignation,
@@ -426,11 +473,16 @@ const EDITABLE_USER_FIELDS = [
 ] as const;
 
 export const updateUser = async (data: UpdateUserInput, c: Context) => {
+  cleanLinks(data);
   const { batch, skills, designation, committeeNumber, session, portfolioUrl } = data;
   const user = c.get('user');
   if (!user.id) {
     throw new HTTPException(400, { message: 'User id is required' });
   }
+
+  const access = await resolveProfileAccess(user.id);
+  const isFaculty = access.kind === 'faculty';
+  const isMember = access.kind === 'member';
 
   // Copy only whitelisted columns, so a request can't set id, password,
   // mustChangePassword or anything else on the users row
@@ -441,7 +493,12 @@ export const updateUser = async (data: UpdateUserInput, c: Context) => {
 
   if (typeof userFields.email === 'string') {
     const email = userFields.email.trim().toLowerCase();
-    if (!email.endsWith('@ugrad.iiuc.ac.bd')) {
+    if (isFaculty) {
+      // Teachers use their own university or personal address
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        throw new HTTPException(400, { message: 'Please enter a valid email address' });
+      }
+    } else if (!email.endsWith('@ugrad.iiuc.ac.bd')) {
       throw new HTTPException(400, { message: 'Email must end with @ugrad.iiuc.ac.bd' });
     }
     const [taken] = await db.select({ id: users.id }).from(users).where(eq(users.email, email));
@@ -465,7 +522,8 @@ export const updateUser = async (data: UpdateUserInput, c: Context) => {
   // remove undefined fields for users table
   const updateData = Object.fromEntries(Object.entries(userFields).filter(([, v]) => v !== undefined));
 
-  if (batch !== undefined) {
+  // Teachers have no batch
+  if (batch !== undefined && !isFaculty) {
     updateData.batch = batch;
   }
 
@@ -510,119 +568,140 @@ export const updateUser = async (data: UpdateUserInput, c: Context) => {
     ? skills
     : undefined;
 
-  // 1. Resolve target committee number
-  let targetCommNumber = committeeNumber ? String(committeeNumber).trim() : undefined;
-  if (!targetCommNumber) {
-    const [latestActive] = await db
-      .select({ number: committee.number, session: committee.session })
-      .from(committee)
-      .where(and(isNull(committee.end), eq(committee.isActive, true)))
-      .orderBy(desc(committee.start))
-      .limit(1);
-    targetCommNumber = latestActive?.number || '2027';
-  }
+  // Committee details (designation, committee, skills) belong to current
+  // committee members only. Students and teachers save their basic profile
+  // and nothing here creates or changes a committee membership.
+  let targetCommNumber: string | undefined;
+  let finalDesignation: string | null | undefined;
+  let existingSub: typeof committeeSubmissions.$inferSelect | undefined;
+  let designationPending = false;
+  let syncExecutive = false;
+  // A non-member sent a designation or committee: it was ignored
+  const designationLocked =
+    !isMember &&
+    !isFaculty &&
+    Boolean((designation && String(designation).trim()) || (committeeNumber && String(committeeNumber).trim()));
 
-  // 2. Resolve committee session label if not provided
-  let targetSession = session ? String(session).trim() : undefined;
-  if (!targetSession && targetCommNumber) {
+  if (isMember) {
+    // 1. Only a committee the member already belongs to
+    const requested = committeeNumber ? String(committeeNumber).trim() : '';
+    targetCommNumber = access.memberOf.includes(requested) ? requested : access.memberOf[0];
+
+    // 2. The committee's own session label (not one sent by the client)
     const [commRow] = await db
       .select({ session: committee.session })
       .from(committee)
       .where(eq(committee.number, targetCommNumber))
       .limit(1);
-    targetSession = commRow?.session || undefined;
-  }
+    const targetSession = commRow?.session || undefined;
 
-  // 3. Find existing submission specifically for THIS target committee
-  const [existingSubForTarget] = await db
-    .select()
-    .from(committeeSubmissions)
-    .where(
-      and(
-        or(eq(committeeSubmissions.matrixId, user.id), eq(committeeSubmissions.email, updatedUser.email)),
-        eq(committeeSubmissions.committeeNumber, targetCommNumber),
-      ),
-    )
-    .limit(1);
+    // 3. This member's submission for that committee
+    const [existingSubForTarget] = await db
+      .select()
+      .from(committeeSubmissions)
+      .where(
+        and(
+          or(eq(committeeSubmissions.matrixId, user.id), eq(committeeSubmissions.email, updatedUser.email)),
+          eq(committeeSubmissions.committeeNumber, targetCommNumber),
+        ),
+      )
+      .limit(1);
 
-  // Fallback to any latest submission only for default values (like batch or skills if not provided)
-  const [latestSub] = await db
-    .select()
-    .from(committeeSubmissions)
-    .where(or(eq(committeeSubmissions.matrixId, user.id), eq(committeeSubmissions.email, updatedUser.email)))
-    .orderBy(desc(committeeSubmissions.id))
-    .limit(1);
+    // Latest submission, only for defaults (batch, skills) when there is none yet
+    const [latestSub] = await db
+      .select()
+      .from(committeeSubmissions)
+      .where(or(eq(committeeSubmissions.matrixId, user.id), eq(committeeSubmissions.email, updatedUser.email)))
+      .orderBy(desc(committeeSubmissions.id))
+      .limit(1);
 
-  const existingSub = existingSubForTarget || latestSub;
+    existingSub = existingSubForTarget || latestSub;
 
-  const currentDesignation = existingSubForTarget?.designation || latestSub?.designation;
-  let finalDesignation =
-    designation !== undefined ? designation || currentDesignation : currentDesignation;
+    const [currentExec] = await db
+      .select({ position: executives.position, role: executives.role })
+      .from(executives)
+      .where(and(eq(executives.id, user.id), eq(executives.number, targetCommNumber)));
 
-  // Officer roles (secretary and above) are granted by the President from Add Role.
-  // A member can keep a role they already hold, but can't give themselves a new one.
-  let designationPending = false;
-  let syncExecutive = false;
-  if (finalDesignation && targetCommNumber) {
-    syncExecutive = await canSelfAssignRole(
-      mapDesignationToRole(finalDesignation),
-      user.id,
-      targetCommNumber,
-    );
-    if (!syncExecutive) {
-      const changed =
-        finalDesignation.trim().toLowerCase() !== (currentDesignation ?? '').trim().toLowerCase();
-      if (changed) {
-        designationPending = true;
-        finalDesignation = currentDesignation;
+    const currentDesignation = existingSubForTarget?.designation || currentExec?.position || undefined;
+    finalDesignation =
+      designation !== undefined ? designation || currentDesignation : currentDesignation;
+
+    // Roles are given by the committee (Add Role). From the profile a member can
+    // only retitle themselves within the role they already hold, e.g. one
+    // executive title to another; any change of role (up or down) waits for
+    // the committee.
+    if (finalDesignation) {
+      syncExecutive = mapDesignationToRole(finalDesignation) === currentExec?.role;
+      if (!syncExecutive) {
+        const changed =
+          finalDesignation.trim().toLowerCase() !== (currentDesignation ?? '').trim().toLowerCase();
+        if (changed) {
+          designationPending = true;
+          finalDesignation = currentDesignation;
+        }
       }
+    }
+
+    if (existingSubForTarget) {
+      await db
+        .update(committeeSubmissions)
+        .set({
+          name: updatedUser.name,
+          designation: finalDesignation || existingSubForTarget.designation,
+          batch: batch !== undefined ? batch || existingSubForTarget.batch : existingSubForTarget.batch,
+          email: updatedUser.email,
+          session: targetSession || existingSubForTarget.session,
+          photoUrl: updatedUser.profileImage || existingSubForTarget.photoUrl,
+          bio: updatedUser.description !== undefined ? updatedUser.description : existingSubForTarget.bio,
+          skills: formattedSkills !== undefined ? formattedSkills : existingSubForTarget.skills,
+          portfolioUrl:
+            (portfolioUrl !== undefined ? portfolioUrl : existingSubForTarget.portfolioUrl) ||
+            updatedUser.twitterUrl ||
+            null,
+          githubUrl: updatedUser.githubUrl !== undefined ? updatedUser.githubUrl : existingSubForTarget.githubUrl,
+          linkedinUrl: updatedUser.linkedinUrl !== undefined ? updatedUser.linkedinUrl : existingSubForTarget.linkedinUrl,
+          facebookUrl: updatedUser.facebookUrl !== undefined ? updatedUser.facebookUrl : existingSubForTarget.facebookUrl,
+          updatedAt: new Date(),
+        })
+        .where(eq(committeeSubmissions.id, existingSubForTarget.id));
+    } else {
+      // A member added through Add Role who hasn't filled in their details yet
+      await db.insert(committeeSubmissions).values({
+        name: updatedUser.name,
+        designation: finalDesignation || 'General Member',
+        matrixId: user.id,
+        batch: batch || updatedUser.batch || latestSub?.batch || 'General',
+        email: updatedUser.email,
+        committeeNumber: targetCommNumber,
+        session: targetSession || null,
+        photoUrl: updatedUser.profileImage || latestSub?.photoUrl || null,
+        bio: updatedUser.description || latestSub?.bio || null,
+        skills: formattedSkills || latestSub?.skills || '[]',
+        portfolioUrl: portfolioUrl || updatedUser.twitterUrl || latestSub?.portfolioUrl || null,
+        githubUrl: updatedUser.githubUrl || latestSub?.githubUrl || null,
+        linkedinUrl: updatedUser.linkedinUrl || latestSub?.linkedinUrl || null,
+        facebookUrl: updatedUser.facebookUrl || latestSub?.facebookUrl || null,
+        status: 'approved',
+      });
+    }
+  } else if (!isFaculty && formattedSkills !== undefined) {
+    // A past member's skills still show on their old committee's page
+    const [latestSub] = await db
+      .select()
+      .from(committeeSubmissions)
+      .where(eq(committeeSubmissions.matrixId, user.id))
+      .orderBy(desc(committeeSubmissions.id))
+      .limit(1);
+    if (latestSub) {
+      await db
+        .update(committeeSubmissions)
+        .set({ skills: formattedSkills, updatedAt: new Date() })
+        .where(eq(committeeSubmissions.id, latestSub.id));
+      existingSub = { ...latestSub, skills: formattedSkills };
     }
   }
 
-  if (existingSubForTarget) {
-    await db
-      .update(committeeSubmissions)
-      .set({
-        name: updatedUser.name,
-        designation: finalDesignation || 'General Member',
-        batch: batch !== undefined ? batch || existingSubForTarget.batch : existingSubForTarget.batch,
-        email: updatedUser.email,
-        session: targetSession || existingSubForTarget.session,
-        photoUrl: updatedUser.profileImage || existingSubForTarget.photoUrl,
-        bio: updatedUser.description !== undefined ? updatedUser.description : existingSubForTarget.bio,
-        skills: formattedSkills !== undefined ? formattedSkills : existingSubForTarget.skills,
-        portfolioUrl:
-          (portfolioUrl !== undefined ? portfolioUrl : existingSubForTarget.portfolioUrl) ||
-          updatedUser.twitterUrl ||
-          null,
-        githubUrl: updatedUser.githubUrl !== undefined ? updatedUser.githubUrl : existingSubForTarget.githubUrl,
-        linkedinUrl: updatedUser.linkedinUrl !== undefined ? updatedUser.linkedinUrl : existingSubForTarget.linkedinUrl,
-        facebookUrl: updatedUser.facebookUrl !== undefined ? updatedUser.facebookUrl : existingSubForTarget.facebookUrl,
-        updatedAt: new Date(),
-      })
-      .where(eq(committeeSubmissions.id, existingSubForTarget.id));
-  } else if (finalDesignation || batch || formattedSkills || portfolioUrl || targetCommNumber) {
-    // Insert new committee submission record for this specific committee tenure
-    await db.insert(committeeSubmissions).values({
-      name: updatedUser.name,
-      designation: finalDesignation || 'General Member',
-      matrixId: user.id,
-      batch: batch || updatedUser.batch || latestSub?.batch || 'Batch 58',
-      email: updatedUser.email,
-      committeeNumber: targetCommNumber,
-      session: targetSession || latestSub?.session || null,
-      photoUrl: updatedUser.profileImage || latestSub?.photoUrl || null,
-      bio: updatedUser.description || latestSub?.bio || null,
-      skills: formattedSkills || latestSub?.skills || '[]',
-      portfolioUrl: portfolioUrl || updatedUser.twitterUrl || latestSub?.portfolioUrl || null,
-      githubUrl: updatedUser.githubUrl || latestSub?.githubUrl || null,
-      linkedinUrl: updatedUser.linkedinUrl || latestSub?.linkedinUrl || null,
-      facebookUrl: updatedUser.facebookUrl || latestSub?.facebookUrl || null,
-      status: 'approved',
-    });
-  }
-
-  // 4. Also keep general user profile fields (name, email, photoUrl, bio, social) synced on any other past committee submissions
+  // 4. Keep the basic profile fields in step on every committee record of this user
   await db
     .update(committeeSubmissions)
     .set({
@@ -637,8 +716,8 @@ export const updateUser = async (data: UpdateUserInput, c: Context) => {
     })
     .where(eq(committeeSubmissions.matrixId, user.id));
 
-  // 5. Sync with executives table specifically for targetCommNumber
-  if (syncExecutive && finalDesignation && targetCommNumber) {
+  // 5. Update the member's own executives row (it exists: they're a member)
+  if (isMember && syncExecutive && finalDesignation && targetCommNumber) {
     const posKey = finalDesignation.toLowerCase().trim();
     await db
       .insert(positions)
@@ -648,24 +727,11 @@ export const updateUser = async (data: UpdateUserInput, c: Context) => {
       })
       .onConflictDoNothing();
 
-    const normalizedRole = mapDesignationToRole(finalDesignation);
-
+    // Same role (checked above): only the title changes
     await db
-      .insert(executives)
-      .values({
-        id: user.id,
-        number: targetCommNumber,
-        role: normalizedRole,
-        position: posKey,
-        assignedBy: 'MMU',
-      })
-      .onConflictDoUpdate({
-        target: [executives.id, executives.number],
-        set: {
-          position: posKey,
-          role: normalizedRole,
-        },
-      });
+      .update(executives)
+      .set({ position: posKey })
+      .where(and(eq(executives.id, user.id), eq(executives.number, targetCommNumber)));
   }
 
   invalidateUserCaches();
@@ -744,14 +810,17 @@ export const updateUser = async (data: UpdateUserInput, c: Context) => {
 
   return {
     ...updatedUser,
-    batch: batch !== undefined ? batch : updatedUser.batch || existingSub?.batch || null,
-    skills: finalSkills,
-    designation: finalDesignation || null,
-    committeeNumber: targetCommNumber || null,
-    session: session !== undefined ? session : existingSub?.session || null,
+    profileKind: access.kind,
+    memberCommittees: access.memberOf,
+    batch: isFaculty ? null : updatedUser.batch || existingSub?.batch || null,
+    skills: isFaculty ? [] : finalSkills,
+    designation: finalDesignation || currentPos?.position || null,
+    committeeNumber: targetCommNumber || currentPos?.number || null,
+    session: existingSub?.session || null,
     portfolioUrl: portfolioUrl || updatedUser.twitterUrl || null,
     tenures: formattedTenures,
     designationPending,
+    designationLocked,
     token,
   };
 };

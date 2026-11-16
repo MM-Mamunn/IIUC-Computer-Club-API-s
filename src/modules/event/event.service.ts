@@ -257,7 +257,7 @@ export const listEvents = (committeeNumber?: string, status?: string, gender?: s
           slug: events.slug,
           createdAt: events.createdAt,
           registrationCount:
-            sql<number>`(select count(*)::int from event_registrations er join events e on er.event_id = e.id where er.event_id = ${events.id} and er.payment_status != 'failed' and e.use_external_form = false)`.as(
+            sql<number>`(select count(*)::int from event_registrations er where er.event_id = ${events.id} and er.payment_status != 'failed' and ${events.useExternalForm} = false)`.as(
               'registrationCount',
             ),
         })
@@ -307,7 +307,7 @@ export const listEvents = (committeeNumber?: string, status?: string, gender?: s
         slug: events.slug,
         createdAt: events.createdAt,
         registrationCount:
-          sql<number>`(select count(*)::int from event_registrations er join events e on er.event_id = e.id where er.event_id = ${events.id} and er.payment_status != 'failed' and e.use_external_form = false)`.as(
+          sql<number>`(select count(*)::int from event_registrations er where er.event_id = ${events.id} and er.payment_status != 'failed' and ${events.useExternalForm} = false)`.as(
             'registrationCount',
           ),
       })
@@ -814,6 +814,11 @@ export const guestRegisterForEvent = async (
 
   const studentId = data.studentId.trim().toUpperCase();
   const email = data.email.trim().toLowerCase();
+
+  // Letters-only IDs are kept for Teachers Body accounts (see registerUser)
+  if (!/\d/.test(studentId)) {
+    throw new HTTPException(400, { message: 'Please use your university Matrix ID (e.g. C221046)' });
+  }
 
   // Check if user already exists
   const [existingUser] = await db.select().from(users).where(eq(users.id, studentId));

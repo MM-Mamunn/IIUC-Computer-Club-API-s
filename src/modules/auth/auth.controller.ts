@@ -82,9 +82,13 @@ export const uploadImagePublic = async (c: Context) => {
     const imageUrl = await uploadImageToCloudinary(file);
     return c.json({ imageUrl }, 200);
   } catch (error) {
-    const details = error instanceof Error ? error.message : 'Unknown upload error';
-    console.error('Upload error:', details);
-    return c.json({ message: 'Image upload failed', details }, 500);
+    // Our own checks (e.g. file type) have a clear message for the user
+    if (error instanceof HTTPException) {
+      return c.json({ message: error.message }, error.status);
+    }
+    // Anything else stays in the server log; Cloudinary's raw errors aren't for clients
+    console.error('Upload error:', error instanceof Error ? error.message : error);
+    return c.json({ message: 'Image upload failed' }, 500);
   }
 };
 
@@ -112,10 +116,8 @@ export const uploadImage = async (c: Context) => {
       return c.json({ message: error.message }, error.status);
     }
 
-    const details = error instanceof Error ? error.message : 'Unknown upload error';
-    console.error('Upload error:', details);
-
-    return c.json({ message: 'Image upload failed', details }, 500);
+    console.error('Upload error:', error instanceof Error ? error.message : error);
+    return c.json({ message: 'Image upload failed' }, 500);
   }
 };
 
@@ -130,13 +132,17 @@ export const updateUserController = async (c: Context) => {
   const user = await updateUser(body, c);
 
   const designationPending = Boolean((user as any).designationPending);
+  const designationLocked = Boolean((user as any).designationLocked);
   return c.json(
     {
       success: true,
       message: designationPending
-        ? 'Profile updated. Officer designations are assigned by the President, so your designation was not changed.'
-        : 'Profile updated',
+        ? 'Profile updated. A different role is assigned by the committee (Add Role), so your designation was not changed.'
+        : designationLocked
+          ? 'Profile updated. Only current committee members can set a designation, so it was not changed.'
+          : 'Profile updated',
       designationPending,
+      designationLocked,
       user,
       token: (user as any).token,
     },

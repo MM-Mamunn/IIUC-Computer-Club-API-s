@@ -19,7 +19,6 @@ router.get(
   (c) => c.json({ message: 'Welcome boss' }),
 );
 
-router.get('/test', (c) => c.json({ message: 'Working test' }));
 
 // Directory search for leadership
 router.get(

@@ -111,7 +111,7 @@ router.get('/:id/draft', authMiddleware, getDraft);
 
 // ─── SSLCommerz payment initiation (authenticated) ───
 router.post('/:id/pay-sslcommerz', authMiddleware, async (c: Context) => {
-  const id = parseInt(c.req.param('id'));
+  const id = parseInt(c.req.param('id') ?? '');
   if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
   const user = c.get('user');
   const { frontendBaseUrl } = await c.req.json().catch(() => ({ frontendBaseUrl: '' }));

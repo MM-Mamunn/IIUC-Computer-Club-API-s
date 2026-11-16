@@ -94,6 +94,11 @@ app.onError((err, c) => {
     return c.json({ message: err.message }, err.status);
   }
 
+  // A JSON body that doesn't parse (c.req.json() throws SyntaxError) is the client's mistake, not a 500
+  if (err instanceof SyntaxError && c.req.header('content-type')?.includes('application/json')) {
+    return c.json({ message: 'Invalid request body' }, 400);
+  }
+
   // Log the real error server-side for debugging
   console.error('[Unhandled Error]', err);
 

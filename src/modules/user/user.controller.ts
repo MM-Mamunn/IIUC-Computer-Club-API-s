@@ -1,6 +1,11 @@
 import type { Context } from 'hono';
 import { searchUsers, getUserDirectory, getUserById, getDashboardStats, getBudgetStats } from './user.service';
 import { HTTPException } from 'hono/http-exception';
+import { getRolePriority } from '../global/global.service';
+
+/** Other users' emails are only shown to the leadership (priority 1-4) */
+export const callerSeesEmails = async (c: Context) =>
+  (await getRolePriority(c.get('user')?.role as string | undefined)) <= 4;
 
 export const directory = async (c: Context) => {
   const page = parseInt(c.req.query('page') || '1', 10);
@@ -24,14 +29,15 @@ export const search = async (c: Context) => {
   }
   // When filterByRole is true, pass the caller's role to filter out equal/higher-priority users
   const callerRole = filterByRole ? (c.get('user')?.role as string | undefined) : undefined;
-  const results = await searchUsers(query, committeeNumber, callerRole, executivesOnly);
+  const results = await searchUsers(query, committeeNumber, callerRole, executivesOnly, await callerSeesEmails(c));
   return c.json({ users: results }, 200);
 };
 
 export const getUser = async (c: Context) => {
-  const id = c.req.param('id');
+  const id = c.req.param('id') ?? '';
   const user = await getUserById(id);
   if (!user) throw new HTTPException(404, { message: 'User not found' });
+  if (!(await callerSeesEmails(c))) user.email = '';
   return c.json({ user }, 200);
 };
 

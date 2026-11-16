@@ -173,8 +173,8 @@ export const getUserDirectory = async (params: {
 };
 
 // ─── Search Users ───
-export const searchUsers = async (query: string, committeeNumber?: string, callerRole?: string, executivesOnly?: boolean) => {
-  const results = await db
+export const searchUsers = async (query: string, committeeNumber?: string, callerRole?: string, executivesOnly?: boolean, withEmail = true) => {
+  const rows = await db
     .select({
       id: users.id,
       name: users.name,
@@ -187,10 +187,12 @@ export const searchUsers = async (query: string, committeeNumber?: string, calle
       or(
         ilike(users.id, `%${query}%`),
         ilike(users.name, `%${query}%`),
-        ilike(users.email, `%${query}%`),
+        // Only leadership may look people up by email
+        withEmail ? ilike(users.email, `%${query}%`) : undefined,
       ),
     )
     .limit(20);
+  const results = withEmail ? rows : rows.map((r) => ({ ...r, email: '' }));
 
   // Fetch role priorities for filtering
   const rolePriorities = await db

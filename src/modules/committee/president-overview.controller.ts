@@ -14,7 +14,7 @@ export const presidentCommittees = async (c: Context) => {
 
 /** GET /committee/president/:number/overview — full committee financial overview */
 export const presidentOverview = async (c: Context) => {
-  const number = c.req.param('number');
+  const number = c.req.param('number') ?? '';
   const user = c.get('user');
   const overview = await getCommitteeOverview(number, user?.id);
   return c.json({ overview }, 200);
