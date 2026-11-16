@@ -5,6 +5,7 @@ import { users } from '../../db/schema';
 import { eq, and, desc, or, gt } from 'drizzle-orm';
 import { HTTPException } from 'hono/http-exception';
 import { sendRefundOpenedEmail, sendRefundStatusEmail } from '../../utils/email';
+import { runAfterResponse } from '../../utils/background';
 
 // ─── Statuses ───
 export type RefundStatus =
@@ -370,7 +371,9 @@ export const processRefund = async (
     .where(eq(events.id, req.eventId));
 
   if (student && event) {
-    await sendRefundStatusEmail(student.email, student.name, event.title, 'confirmed');
+    runAfterResponse('sendRefundStatusEmail', () =>
+      sendRefundStatusEmail(student.email, student.name, event.title, 'confirmed'),
+    );
   }
 
   return updated;

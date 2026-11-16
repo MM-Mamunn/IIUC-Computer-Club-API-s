@@ -232,6 +232,20 @@
       "when": 1793387268114,
       "tag": "0032_event_thumbnail",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1794765916003,
+      "tag": "0033_rate_limits",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1794771346627,
+      "tag": "0034_event_indexes",
+      "breakpoints": true
     }
   ]
 }

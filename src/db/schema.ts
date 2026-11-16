@@ -5,6 +5,7 @@ import {
   timestamp,
   date,
   primaryKey,
+  index,
   doublePrecision,
   integer,
   boolean,
@@ -116,6 +117,7 @@ export const executives = pgTable(
   },
   (table) => ({
     pk: primaryKey({ columns: [table.id, table.number] }),
+    numberIdx: index('executives_number_idx').on(table.number),
   }),
 );
 
@@ -156,3 +158,14 @@ export const committeeSubmissions = pgTable('committee_submissions', {
   uqSubMatrixComm: unique('uq_sub_matrix_comm').on(table.matrixId, table.committeeNumber),
 }));
 
+
+/* =========================
+   RATE LIMITS
+   Shared counters for the auth rate limiter, so a limit holds across every
+   serverless instance instead of each one counting on its own.
+========================= */
+export const rateLimits = pgTable('rate_limits', {
+  key: varchar('key', { length: 255 }).primaryKey(),
+  count: integer('count').notNull().default(0),
+  resetAt: timestamp('reset_at', { withTimezone: true }).notNull(),
+});

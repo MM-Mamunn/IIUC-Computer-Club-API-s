@@ -6,6 +6,8 @@ import {
   create,
   list,
   getOne,
+  getOneStaff,
+  staffBudgets,
   update,
   remove,
   register,
@@ -50,7 +52,12 @@ import {
   slugAvailability,
 } from './event.controller';
 import { initiateSslcommerzPayment, handleSslcommerzIpn } from './sslcommerz.service';
+import { resolveFrontendUrl } from '../../config/origins';
+import { rateLimiter } from '../../middlewares/rate-limit.middleware';
 import type { Context } from 'hono';
+import { eq } from 'drizzle-orm';
+import { db } from '../../config/db';
+import { events } from '../../db/event.schema';
 
 const router = new Hono();
 
@@ -68,10 +75,24 @@ router.get(
 // Live check for the slug field in the event form (before /:id)
 router.get('/slug-available', authMiddleware, slugAvailability);
 
+// Staff views with budget figures; private, never CDN-cached (before /:id)
+router.get('/staff/budgets', authMiddleware, staffBudgets);
+
 router.get('/:id', getOne);
+router.get(
+  '/:id/staff',
+  authMiddleware,
+  requireAdminOrEventManager(await getRolesByPriorityRange(1, 4)),
+  getOneStaff,
+);
 
 // ─── Guest event registration (no auth — creates account + registers) ───
-router.post('/:id/guest-register', guestRegister);
+// Creates an account, so limit it like /auth/register
+router.post(
+  '/:id/guest-register',
+  rateLimiter({ keyPrefix: 'guest-register-ip', windowMs: 60 * 60 * 1000, max: 60 }),
+  guestRegister,
+);
 
 // ─── Fix payment (public — uses token from rejection email) ───
 router.get('/:id/fix-payment', getFixPaymentDetailsController);
@@ -105,36 +126,28 @@ router.post('/payment/sslcommerz/ipn', async (c: Context) => {
   return c.text('OK', 200);
 });
 
-router.post('/payment/sslcommerz/success', async (c: Context) => {
+// SSLCommerz posts the browser back here; send it to our own site only.
+// Straight to the slug URL: /events/<id> redirects there and drops the
+// ?payment= the page needs for its result message.
+const paymentRedirect = (outcome: 'success' | 'failed' | 'cancelled') => async (c: Context) => {
   const body = await c.req.parseBody();
-  const frontendBaseUrl = (body.value_c as string) || '';
-  const eventId = body.value_a as string;
-  // Redirect user back to the event page
-  const redirectUrl = frontendBaseUrl
-    ? `${frontendBaseUrl}/events/${eventId}?payment=success`
-    : `/events/${eventId}?payment=success`;
-  return c.redirect(redirectUrl);
-});
+  const frontendBaseUrl = resolveFrontendUrl(body.value_c);
+  const eventId = String(body.value_a ?? '').replace(/[^0-9]/g, '');
+  let path = eventId;
+  if (eventId) {
+    const [row] = await db
+      .select({ slug: events.slug })
+      .from(events)
+      .where(eq(events.id, Number(eventId)))
+      .catch(() => []);
+    if (row?.slug) path = encodeURIComponent(row.slug);
+  }
+  return c.redirect(`${frontendBaseUrl}/events/${path}?payment=${outcome}`);
+};
 
-router.post('/payment/sslcommerz/fail', async (c: Context) => {
-  const body = await c.req.parseBody();
-  const frontendBaseUrl = (body.value_c as string) || '';
-  const eventId = body.value_a as string;
-  const redirectUrl = frontendBaseUrl
-    ? `${frontendBaseUrl}/events/${eventId}?payment=failed`
-    : `/events/${eventId}?payment=failed`;
-  return c.redirect(redirectUrl);
-});
-
-router.post('/payment/sslcommerz/cancel', async (c: Context) => {
-  const body = await c.req.parseBody();
-  const frontendBaseUrl = (body.value_c as string) || '';
-  const eventId = body.value_a as string;
-  const redirectUrl = frontendBaseUrl
-    ? `${frontendBaseUrl}/events/${eventId}?payment=cancelled`
-    : `/events/${eventId}?payment=cancelled`;
-  return c.redirect(redirectUrl);
-});
+router.post('/payment/sslcommerz/success', paymentRedirect('success'));
+router.post('/payment/sslcommerz/fail', paymentRedirect('failed'));
+router.post('/payment/sslcommerz/cancel', paymentRedirect('cancelled'));
 
 // ─── Executive-only (priority ≤ 4) ───
 router.post('/', authMiddleware, requireRole(await getRolesByPriorityRange(1, 4)), create);

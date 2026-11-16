@@ -1,5 +1,6 @@
 import nodemailer from 'nodemailer';
 import { formatBangladeshDateTime } from './datetime';
+import { escapeHtml } from './escape-html';
 
 const SMTP_HOST = process.env.SMTP_HOST || 'smtp.gmail.com';
 const SMTP_PORT = Number(process.env.SMTP_PORT) || 587;
@@ -219,13 +220,13 @@ export async function sendWelcomeEmail(
         <h1 style="color: #1a1a1a; margin: 0;">IIUC Computer Club</h1>
       </div>
       <div style="background: #f8f9fa; border-radius: 8px; padding: 24px; margin-bottom: 16px;">
-        <h2 style="color: #333; margin-top: 0;">Welcome, ${name}!</h2>
+        <h2 style="color: #333; margin-top: 0;">Welcome, ${escapeHtml(name)}!</h2>
         <p style="color: #555; line-height: 1.6;">
           An account has been created for you on the IIUC Computer Club platform.
           Use the credentials below to log in to your dashboard.
         </p>
         <div style="background: #fff; border: 1px solid #e0e0e0; border-radius: 6px; padding: 16px; margin: 16px 0;">
-          <p style="margin: 4px 0;"><strong>ID:</strong> ${studentId}</p>
+          <p style="margin: 4px 0;"><strong>ID:</strong> ${escapeHtml(studentId)}</p>
           <p style="margin: 4px 0;"><strong>Temporary Password:</strong> <code style="background: #eee; padding: 2px 8px; border-radius: 4px; font-size: 16px;">${tempPassword}</code></p>
         </div>
         <p style="color: #d32f2f; font-weight: bold;">
@@ -281,8 +282,8 @@ export async function sendEventRegistrationEmail(
   const headingText = isPending ? 'Registration Received! 📝' : 'Registration Confirmed! ✅';
 
   const bodyText = isPending
-    ? `Hi <strong>${name}</strong>, we have received your registration request and payment details for the following event:`
-    : `Hi <strong>${name}</strong>, you have successfully registered for the following event:`;
+    ? `Hi <strong>${escapeHtml(name)}</strong>, we have received your registration request and payment details for the following event:`
+    : `Hi <strong>${escapeHtml(name)}</strong>, you have successfully registered for the following event:`;
 
   const pendingNote = isPending
     ? '<p style="color: #b45309; font-weight: bold; margin-top: 16px;">Your registration and payment information are currently pending verification. We will verify the details and notify you once your registration is fully confirmed.</p>'
@@ -299,9 +300,9 @@ export async function sendEventRegistrationEmail(
           ${bodyText}
         </p>
         <div style="background: #fff; border: 1px solid ${bannerBorder}; border-radius: 6px; padding: 16px; margin: 16px 0;">
-          <h3 style="margin-top: 0; color: #1a1a1a;">${eventTitle}</h3>
+          <h3 style="margin-top: 0; color: #1a1a1a;">${escapeHtml(eventTitle)}</h3>
           <p style="margin: 4px 0; color: #555;">📅 <strong>Date:</strong> ${dateStr}</p>
-          ${venue ? `<p style="margin: 4px 0; color: #555;">📍 <strong>Venue:</strong> ${venue}</p>` : ''}
+          ${venue ? `<p style="margin: 4px 0; color: #555;">📍 <strong>Venue:</strong> ${escapeHtml(venue)}</p>` : ''}
           ${paymentLine}
         </div>
         ${pendingNote}
@@ -349,12 +350,12 @@ export async function sendPaymentConfirmedEmail(
       <div style="background: #f0f9f0; border-radius: 8px; padding: 24px; margin-bottom: 16px;">
         <h2 style="color: #2e7d32; margin-top: 0;">Payment Confirmed! ✅</h2>
         <p style="color: #555; line-height: 1.6;">
-          Hi <strong>${name}</strong>, your payment has been verified for the following event:
+          Hi <strong>${escapeHtml(name)}</strong>, your payment has been verified for the following event:
         </p>
         <div style="background: #fff; border: 1px solid #c8e6c9; border-radius: 6px; padding: 16px; margin: 16px 0;">
-          <h3 style="margin-top: 0; color: #1a1a1a;">${eventTitle}</h3>
+          <h3 style="margin-top: 0; color: #1a1a1a;">${escapeHtml(eventTitle)}</h3>
           <p style="margin: 4px 0; color: #555;">📅 <strong>Date:</strong> ${dateStr}</p>
-          ${venue ? `<p style="margin: 4px 0; color: #555;">📍 <strong>Venue:</strong> ${venue}</p>` : ''}
+          ${venue ? `<p style="margin: 4px 0; color: #555;">📍 <strong>Venue:</strong> ${escapeHtml(venue)}</p>` : ''}
           ${amountLine}
         </div>
         <p style="color: #2e7d32; font-weight: bold;">Your registration is now fully confirmed. See you at the event!</p>
@@ -388,11 +389,11 @@ export async function sendPasswordResetEmail(to: string, name: string, resetLink
       <div style="background: #fff3e0; border-radius: 8px; padding: 24px; margin-bottom: 16px;">
         <h2 style="color: #e65100; margin-top: 0;">Password Reset Request</h2>
         <p style="color: #555; line-height: 1.6;">
-          Hi <strong>${name}</strong>, we received a request to reset your password.
+          Hi <strong>${escapeHtml(name)}</strong>, we received a request to reset your password.
           Click the button below to set a new password:
         </p>
         <div style="text-align: center; margin: 24px 0;">
-          <a href="${resetLink}" style="background: #1976d2; color: #fff; text-decoration: none; padding: 12px 32px; border-radius: 6px; font-weight: bold; display: inline-block;">
+          <a href="${escapeHtml(resetLink)}" style="background: #1976d2; color: #fff; text-decoration: none; padding: 12px 32px; border-radius: 6px; font-weight: bold; display: inline-block;">
             Reset Password
           </a>
         </div>
@@ -400,7 +401,7 @@ export async function sendPasswordResetEmail(to: string, name: string, resetLink
           Or copy and paste this link into your browser:
         </p>
         <p style="color: #1976d2; word-break: break-all; font-size: 13px;">
-          ${resetLink}
+          ${escapeHtml(resetLink)}
         </p>
         <p style="color: #d32f2f; font-weight: bold; margin-top: 16px;">
           ⚠️ This link will expire in 15 minutes. If you did not request this, please ignore this email.
@@ -497,12 +498,12 @@ export async function sendPaymentRejectionEmail(
       <div style="background: #fffbeb; border-radius: 8px; padding: 24px; margin-bottom: 16px;">
         <h2 style="color: #b45309; margin-top: 0;">Registration Action Required ⚠️</h2>
         <p style="color: #555; line-height: 1.6;">
-          Hi <strong>${name}</strong>, there is an issue with your registration for the following event:
+          Hi <strong>${escapeHtml(name)}</strong>, there is an issue with your registration for the following event:
         </p>
         <div style="background: #fff; border: 1px solid #fde68a; border-radius: 6px; padding: 16px; margin: 16px 0;">
-          <h3 style="margin-top: 0; color: #1a1a1a;">${eventTitle}</h3>
+          <h3 style="margin-top: 0; color: #1a1a1a;">${escapeHtml(eventTitle)}</h3>
           <p style="margin: 4px 0; color: #555;">📅 <strong>Date:</strong> ${dateStr}</p>
-          ${venue ? `<p style="margin: 4px 0; color: #555;">📍 <strong>Venue:</strong> ${venue}</p>` : ''}
+          ${venue ? `<p style="margin: 4px 0; color: #555;">📍 <strong>Venue:</strong> ${escapeHtml(venue)}</p>` : ''}
           ${amountLine}
         </div>
         <div style="background: #fff; border: 1px solid #fde68a; border-radius: 6px; padding: 16px; margin: 16px 0;">
@@ -514,7 +515,7 @@ export async function sendPaymentRejectionEmail(
           ${instructionText}
         </p>
         <div style="text-align: center; margin: 24px 0;">
-          <a href="${fixPaymentLink}" style="background: #1976d2; color: #fff; text-decoration: none; padding: 12px 32px; border-radius: 6px; font-weight: bold; display: inline-block;">
+          <a href="${escapeHtml(fixPaymentLink)}" style="background: #1976d2; color: #fff; text-decoration: none; padding: 12px 32px; border-radius: 6px; font-weight: bold; display: inline-block;">
             ${buttonLabel}
           </a>
         </div>
@@ -522,7 +523,7 @@ export async function sendPaymentRejectionEmail(
           Or copy and paste this link into your browser:
         </p>
         <p style="color: #1976d2; word-break: break-all; font-size: 13px;">
-          ${fixPaymentLink}
+          ${escapeHtml(fixPaymentLink)}
         </p>
       </div>
       <p style="color: #999; font-size: 12px; text-align: center;">
@@ -568,7 +569,7 @@ export async function sendRefundOpenedEmail(
       <div style="background: #fdf6ec; border-radius: 8px; padding: 24px; margin-bottom: 16px;">
         <h2 style="color: #b45309; margin-top: 0;">Event Cancelled — Refund Initiated 💸</h2>
         <p style="color: #555; line-height: 1.6;">
-          Hi <strong>${name}</strong>, unfortunately the event <strong>${eventTitle}</strong> has been cancelled.
+          Hi <strong>${escapeHtml(name)}</strong>, unfortunately the event <strong>${escapeHtml(eventTitle)}</strong> has been cancelled.
         </p>
         <p style="color: #555; line-height: 1.6;">
           We will refund your full registration fee of <strong>৳${refundAmount}</strong>.
@@ -613,7 +614,7 @@ export async function sendRefundStatusEmail(
     },
     rejected: {
       headline: 'Refund Destination Rejected ❌',
-      body: `Your refund destination was rejected${rejectionReason ? `: <em>${rejectionReason}</em>` : ''}. Please log in and resubmit with correct information.`,
+      body: `Your refund destination was rejected${rejectionReason ? `: <em>${escapeHtml(rejectionReason)}</em>` : ''}. Please log in and resubmit with correct information.`,
       color: '#c62828',
     },
     paid: {
@@ -633,9 +634,9 @@ export async function sendRefundStatusEmail(
       </div>
       <div style="background: #f8f9fa; border-radius: 8px; padding: 24px; margin-bottom: 16px;">
         <h2 style="color: ${meta.color}; margin-top: 0;">${meta.headline}</h2>
-        <p style="color: #555; line-height: 1.6;">Hi <strong>${name}</strong>,</p>
+        <p style="color: #555; line-height: 1.6;">Hi <strong>${escapeHtml(name)}</strong>,</p>
         <p style="color: #555; line-height: 1.6;">${meta.body}</p>
-        <p style="color: #555; line-height: 1.6;">Event: <strong>${eventTitle}</strong></p>
+        <p style="color: #555; line-height: 1.6;">Event: <strong>${escapeHtml(eventTitle)}</strong></p>
       </div>
       <p style="color: #999; font-size: 12px; text-align: center;">
         This is an automated message from IIUC Computer Club. Please do not reply.
@@ -675,19 +676,19 @@ export async function sendDutyAssignmentEmail(
       <div style="background: #fdf6ec; border-radius: 8px; padding: 24px; margin-bottom: 16px;">
         <h2 style="color: #b45309; margin-top: 0;">New Event Assignment 📅</h2>
         <p style="color: #555; line-height: 1.6;">
-          Hi <strong>${name}</strong>, you have been assigned a new role/duty for the following event:
+          Hi <strong>${escapeHtml(name)}</strong>, you have been assigned a new role/duty for the following event:
         </p>
         <div style="background: #fff; border: 1px solid #fcd34d; border-radius: 6px; padding: 16px; margin: 16px 0;">
-          <h3 style="margin-top: 0; color: #1a1a1a;">${eventTitle}</h3>
-          <p style="margin: 4px 0; color: #555;">📋 <strong>Assigned Role:</strong> ${assignedRole}</p>
+          <h3 style="margin-top: 0; color: #1a1a1a;">${escapeHtml(eventTitle)}</h3>
+          <p style="margin: 4px 0; color: #555;">📋 <strong>Assigned Role:</strong> ${escapeHtml(assignedRole)}</p>
           <p style="margin: 4px 0; color: #555;">📅 <strong>Event Date:</strong> ${dateStr}</p>
-          ${venue ? `<p style="margin: 4px 0; color: #555;">📍 <strong>Event Location:</strong> ${venue}</p>` : ''}
+          ${venue ? `<p style="margin: 4px 0; color: #555;">📍 <strong>Event Location:</strong> ${escapeHtml(venue)}</p>` : ''}
         </div>
         <p style="color: #555; line-height: 1.6;">
           You can view and manage your assigned duties inside your dashboard:
         </p>
         <div style="text-align: center; margin: 24px 0;">
-          <a href="${dashboardLink}" style="background: #1976d2; color: #fff; text-decoration: none; padding: 12px 32px; border-radius: 6px; font-weight: bold; display: inline-block;">
+          <a href="${escapeHtml(dashboardLink)}" style="background: #1976d2; color: #fff; text-decoration: none; padding: 12px 32px; border-radius: 6px; font-weight: bold; display: inline-block;">
             Go to Dashboard
           </a>
         </div>

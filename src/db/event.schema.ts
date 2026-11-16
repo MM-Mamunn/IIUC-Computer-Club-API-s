@@ -11,6 +11,7 @@ import {
   serial,
   jsonb,
   uniqueIndex,
+  index,
 } from 'drizzle-orm/pg-core';
 import { users, committee } from './schema';
 
@@ -200,6 +201,9 @@ export const eventRegistrations = pgTable(
   },
   (table) => ({
     pk: primaryKey({ columns: [table.eventId, table.userId] }),
+    userIdx: index('event_registrations_user_id_idx').on(table.userId),
+    tranIdx: index('event_registrations_sslcommerz_tran_id_idx').on(table.sslcommerzTranId),
+    valIdx: index('event_registrations_sslcommerz_val_id_idx').on(table.sslcommerzValId),
   }),
 );
 
@@ -239,6 +243,7 @@ export const eventDuties = pgTable(
   },
   (table) => ({
     pk: primaryKey({ columns: [table.eventId, table.userId, table.duty] }),
+    userIdx: index('event_duties_user_id_idx').on(table.userId),
   }),
 );
 
@@ -272,6 +277,7 @@ export const eventManagers = pgTable(
   },
   (table) => ({
     pk: primaryKey({ columns: [table.eventId, table.userId] }),
+    userIdx: index('event_managers_user_id_idx').on(table.userId),
   }),
 );
 
@@ -304,7 +310,9 @@ export const eventExpenses = pgTable('event_expenses', {
     .references(() => users.id, { onDelete: 'set null', onUpdate: 'cascade' }),
 
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
-});
+}, (table) => ({
+  eventIdx: index('event_expenses_event_id_idx').on(table.eventId),
+}));
 
 /* =========================
    EXPENSE CLAIMS TABLE
@@ -360,7 +368,10 @@ export const expenseClaims = pgTable('expense_claims', {
 
   /** JSON history of changes to the claim */
   auditHistory: jsonb('audit_history'),
-});
+}, (table) => ({
+  eventIdx: index('expense_claims_event_id_idx').on(table.eventId),
+  userIdx: index('expense_claims_user_id_idx').on(table.userId),
+}));
 
 /* =========================
    VOUCHERS TABLE
@@ -500,6 +511,7 @@ export const refundRequests = pgTable(
   },
   (table) => ({
     uniq: uniqueIndex('refund_requests_event_user_uniq').on(table.eventId, table.userId),
+    userIdx: index('refund_requests_user_id_idx').on(table.userId),
   }),
 );
 
@@ -601,4 +613,7 @@ export const certificates = pgTable('certificates', {
 
   /** Revoked certificates fail verification but keep their code */
   revokedAt: timestamp('revoked_at', { withTimezone: true }),
-});
+}, (table) => ({
+  eventIdx: index('certificates_event_id_idx').on(table.eventId),
+  recipientEmailIdx: index('certificates_recipient_email_idx').on(table.recipientEmail),
+}));

@@ -3,6 +3,7 @@ import {
   createEvent,
   listEvents,
   getEventById,
+  getStaffEventBudgets,
   checkSlugAvailability,
   updateEvent,
   deleteEvent,
@@ -176,6 +177,21 @@ export const getOne = async (c: Context) => {
   return c.json({ event }, 200);
 };
 
+/** The full event for the edit form (budgets included). Per-user, so never cached. */
+export const getOneStaff = async (c: Context) => {
+  const id = parseInt(c.req.param('id'));
+  if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
+  const event = await getEventById(id);
+  c.header('Cache-Control', 'private, no-store');
+  return c.json({ event }, 200);
+};
+
+export const staffBudgets = async (c: Context) => {
+  const budgets = await getStaffEventBudgets(c.get('user'));
+  c.header('Cache-Control', 'private, no-store');
+  return c.json({ budgets }, 200);
+};
+
 export const update = async (c: Context) => {
   const id = parseInt(c.req.param('id'));
   if (isNaN(id)) return c.json({ message: 'Invalid event ID' }, 400);
@@ -245,7 +261,7 @@ export const update = async (c: Context) => {
     data = await c.req.json();
   }
 
-  const event = await updateEvent(id, data);
+  const event = await updateEvent(id, data, c.get('user'));
   invalidate('events:');
   return c.json({ event }, 200);
 };
@@ -556,14 +572,14 @@ export const updateExpenseController = async (c: Context) => {
     data = await c.req.json();
   }
 
-  const expense = await updateEventExpense(expenseId, data);
+  const expense = await updateEventExpense(expenseId, data, parseInt(c.req.param('id')));
   return c.json({ expense }, 200);
 };
 
 export const deleteExpenseController = async (c: Context) => {
   const expenseId = parseInt(c.req.param('expenseId'));
   if (isNaN(expenseId)) return c.json({ message: 'Invalid expense ID' }, 400);
-  const result = await deleteEventExpense(expenseId);
+  const result = await deleteEventExpense(expenseId, parseInt(c.req.param('id')));
   return c.json(result, 200);
 };
 
@@ -628,7 +644,7 @@ export const updateClaimController = async (c: Context) => {
     data = await c.req.json();
   }
 
-  const claim = await updateExpenseClaim(claimId, user.id, data);
+  const claim = await updateExpenseClaim(claimId, user.id, data, parseInt(c.req.param('id')));
   return c.json({ claim }, 200);
 };
 
@@ -637,7 +653,7 @@ export const deleteClaimController = async (c: Context) => {
   if (isNaN(claimId)) return c.json({ message: 'Invalid claim ID' }, 400);
   const user = c.get('user');
 
-  const claim = await deleteExpenseClaim(claimId, user.id);
+  const claim = await deleteExpenseClaim(claimId, user.id, parseInt(c.req.param('id')));
   return c.json({ claim }, 200);
 };
 
@@ -648,7 +664,7 @@ export const reviewClaimController = async (c: Context) => {
   const { approved, notes } = await c.req.json();
   if (typeof approved !== 'boolean')
     return c.json({ message: 'approved (boolean) is required' }, 400);
-  const claim = await reviewExpenseClaim(claimId, user.id, approved, notes);
+  const claim = await reviewExpenseClaim(claimId, user.id, approved, notes, parseInt(c.req.param('id')));
   return c.json({ claim }, 200);
 };
 
@@ -667,7 +683,7 @@ export const markClaimPaidController = async (c: Context) => {
     }
   }
 
-  const claim = await markClaimPaid(claimId, user.id, paymentProofUrl);
+  const claim = await markClaimPaid(claimId, user.id, paymentProofUrl, parseInt(c.req.param('id')));
   return c.json({ claim }, 200);
 };
 

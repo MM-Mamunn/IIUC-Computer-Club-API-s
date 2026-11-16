@@ -11,6 +11,8 @@ import {
   getAllCommitteeSubmissions,
 } from './committee.service';
 import { cdnCache } from '../../utils/cache';
+import { HTTPException } from 'hono/http-exception';
+import { getRolesByPriorityRange } from '../global/global.service';
 
 // committee.controller.ts
 type CommitteeBody = {
@@ -90,6 +92,7 @@ export const createSubmission = async (c: Context) => {
   const matrixId = (user?.id || String(data.matrixId || '')).toUpperCase().trim();
 
   const result = await submitCommitteeApplication({
+    callerId: user?.id ?? null,
     name: String(data.name || ''),
     designation: String(data.designation || ''),
     matrixId,
@@ -114,6 +117,12 @@ export const createSubmission = async (c: Context) => {
 
 export const getSubmission = async (c: Context) => {
   const matrixId = c.req.param('matrixId');
+  // Members may read their own submission; committee admins may read anyone's
+  const user = c.get('user');
+  const admins = await getRolesByPriorityRange(1, 4);
+  if (matrixId.toUpperCase() !== String(user?.id).toUpperCase() && !admins.includes(user?.role)) {
+    throw new HTTPException(403, { message: 'You can only view your own submission' });
+  }
   const submission = await getCommitteeSubmissionByMatrixId(matrixId);
   return c.json({ submission }, 200);
 };

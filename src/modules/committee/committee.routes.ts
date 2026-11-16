@@ -36,7 +36,12 @@ router.post(
   createSubmission,
 );
 router.get('/submission/:matrixId', authMiddleware, getSubmission);
-router.get('/submissions', authMiddleware, listSubmissions);
+router.get(
+  '/submissions',
+  authMiddleware,
+  requireRole(await getRolesByPriorityRange(1, 4)),
+  listSubmissions,
+);
 
 
 

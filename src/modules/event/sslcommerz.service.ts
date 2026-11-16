@@ -99,21 +99,55 @@ export const initiateSslcommerzPayment = async (
   return { gatewayUrl: result.GatewayPageURL, tranId };
 };
 
+/** Fields we use from SSLCommerz's validation API response */
+export interface SslcommerzValidation {
+  status?: string;
+  tran_id?: string;
+  val_id?: string;
+  amount?: string;
+  currency?: string;
+  currency_type?: string;
+  currency_amount?: string;
+}
+
 /**
- * Validate an SSLCommerz payment via their validation API.
+ * Ask SSLCommerz whether `valId` is a real, completed payment. Returns the
+ * validation record, or null if it isn't valid or the call failed.
  */
-export const validateSslcommerzPayment = async (valId: string): Promise<boolean> => {
-  if (!SSLCOMMERZ_STORE_ID || !SSLCOMMERZ_STORE_PASSWORD) return false;
+export const validateSslcommerzPayment = async (
+  valId: string,
+): Promise<SslcommerzValidation | null> => {
+  if (!SSLCOMMERZ_STORE_ID || !SSLCOMMERZ_STORE_PASSWORD) return null;
 
   const url = `${VALIDATION_URL}?val_id=${encodeURIComponent(valId)}&store_id=${encodeURIComponent(SSLCOMMERZ_STORE_ID)}&store_passwd=${encodeURIComponent(SSLCOMMERZ_STORE_PASSWORD)}&format=json`;
 
   try {
     const response = await fetch(url);
-    const result = await response.json();
-    return result.status === 'VALID' || result.status === 'VALIDATED';
+    const result = (await response.json()) as SslcommerzValidation;
+    return result.status === 'VALID' || result.status === 'VALIDATED' ? result : null;
   } catch {
-    return false;
+    return null;
   }
+};
+
+/**
+ * Why a validated payment doesn't pay for this registration, or null if it does.
+ * A real payment for one transaction (or a cheaper event) must not be replayed
+ * against another registration.
+ */
+export const paymentMismatch = (
+  validation: SslcommerzValidation,
+  tranId: string,
+  valId: string,
+  fee: number,
+): string | null => {
+  if (validation.tran_id !== tranId) return 'transaction id does not match';
+  if (validation.val_id && validation.val_id !== valId) return 'validation id does not match';
+  const currency = validation.currency_type || validation.currency;
+  if (currency !== 'BDT') return `unexpected currency ${currency}`;
+  const paid = Number(validation.currency_amount ?? validation.amount);
+  if (!Number.isFinite(paid) || paid + 0.01 < fee) return `paid ${paid} but the fee is ${fee}`;
+  return null;
 };
 
 /**
@@ -126,34 +160,54 @@ export const handleSslcommerzIpn = async (body: Record<string, string>) => {
     throw new HTTPException(400, { message: 'Invalid IPN data' });
   }
 
-  if (status !== 'VALID') {
-    // Payment not valid — mark as failed
-    const [reg] = await db
-      .select()
-      .from(eventRegistrations)
-      .where(eq(eventRegistrations.sslcommerzTranId, tran_id));
+  const [reg] = await db
+    .select()
+    .from(eventRegistrations)
+    .where(eq(eventRegistrations.sslcommerzTranId, tran_id));
 
-    if (reg) {
-      await db
-        .update(eventRegistrations)
-        .set({ paymentStatus: 'failed' })
-        .where(
-          and(
-            eq(eventRegistrations.eventId, reg.eventId),
-            eq(eventRegistrations.userId, reg.userId),
-          ),
-        );
-      
-      invalidate('events:');
-      invalidate('dashboard:');
-      invalidate('president:');
-    }
+  if (!reg) {
+    throw new HTTPException(404, { message: 'Registration not found for this transaction' });
+  }
+
+  // Nothing in an unauthenticated notification may undo a verified payment
+  if (reg.paymentStatus === 'verified') {
+    return { success: true };
+  }
+
+  if (status !== 'VALID') {
+    await db
+      .update(eventRegistrations)
+      .set({ paymentStatus: 'failed' })
+      .where(
+        and(eq(eventRegistrations.eventId, reg.eventId), eq(eventRegistrations.userId, reg.userId)),
+      );
+
+    invalidate('events:');
+    invalidate('dashboard:');
+    invalidate('president:');
     return { success: false };
   }
 
-  // Validate with SSLCommerz server
-  const isValid = await validateSslcommerzPayment(val_id);
-  if (!isValid) {
+  // Validate with SSLCommerz server, then check the payment is for this registration
+  const validation = await validateSslcommerzPayment(val_id);
+  if (!validation) {
+    throw new HTTPException(400, { message: 'Payment validation failed' });
+  }
+
+  const [event] = await db.select({ fee: events.fee }).from(events).where(eq(events.id, reg.eventId));
+  const mismatch = paymentMismatch(validation, tran_id, val_id, event?.fee ?? 0);
+  if (mismatch) {
+    console.error(`[sslcommerz] Rejected IPN for ${tran_id}: ${mismatch}`);
+    throw new HTTPException(400, { message: 'Payment validation failed' });
+  }
+
+  // One payment can only ever verify one registration
+  const [usedBy] = await db
+    .select({ eventId: eventRegistrations.eventId, userId: eventRegistrations.userId })
+    .from(eventRegistrations)
+    .where(eq(eventRegistrations.sslcommerzValId, val_id));
+  if (usedBy && (usedBy.eventId !== reg.eventId || usedBy.userId !== reg.userId)) {
+    console.error(`[sslcommerz] Rejected IPN for ${tran_id}: val_id already used`);
     throw new HTTPException(400, { message: 'Payment validation failed' });
   }
 

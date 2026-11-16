@@ -3,7 +3,7 @@ import type { Context } from 'hono';
 import { db } from '../../config/db';
 import { committee, executives, users, committeeSubmissions, roles, positions } from '../../db/schema';
 import { HTTPException } from 'hono/http-exception';
-import { and, eq, isNull, isNotNull, desc, or, asc, inArray } from 'drizzle-orm';
+import { and, eq, isNull, isNotNull, desc, or, asc, inArray, sql } from 'drizzle-orm';
 import { cached, invalidate } from '../../utils/cache';
 import {
   uploadImageToCloudinary,
@@ -14,7 +14,8 @@ import {
   toAvatarUrl,
 } from '../../utils/uploadImage';
 import { hashPassword } from '../../utils/hash';
-import { generateToken } from '../../utils/jwt';
+import { issueSessionToken } from '../../utils/session';
+import { getRolesByPriorityRange } from '../global/global.service';
 
 export const addCommittee = async (
   number: string,
@@ -238,6 +239,9 @@ export const closeCommittee = async (number: string, endDate: string, userId?: s
   return updated;
 };
 
+/** The submitted designation, or null while it is still a pending (unapproved) claim */
+const pendingSafeDesignation = sql<string | null>`case when ${committeeSubmissions.status} = 'pending' then null else ${committeeSubmissions.designation} end`;
+
 // ─── Show Committee Members (cached 60s) ───
 export const showMembers = async (number: string) => {
   const [com] = await db.select().from(committee).where(eq(committee.number, number));
@@ -258,7 +262,8 @@ export const showMembers = async (number: string) => {
         profileImage: users.profileImage,
         role: executives.role,
         position: executives.position,
-        subDesignation: committeeSubmissions.designation,
+        // A pending officer claim must not show as the member's title
+        subDesignation: pendingSafeDesignation,
         userBio: users.description,
         userBatch: users.batch,
         subBatch: committeeSubmissions.batch,
@@ -316,7 +321,7 @@ export const showMembers = async (number: string) => {
               position: executives.position,
               role: executives.role,
               session: committee.session,
-              subDesignation: committeeSubmissions.designation,
+              subDesignation: pendingSafeDesignation,
             })
             .from(executives)
             .innerJoin(committee, eq(executives.number, committee.number))
@@ -469,6 +474,8 @@ export const showMembers = async (number: string) => {
 // ─── Committee Member Application Submissions ───
 
 export interface CommitteeSubmissionInput {
+  /** Logged-in user making the submission, if any */
+  callerId?: string | null;
   name: string;
   designation: string;
   matrixId: string;
@@ -512,6 +519,24 @@ export function mapDesignationToRole(designation: string): string {
   if (r.includes('secretary')) return 'secretary';
   return 'executive member';
 }
+
+/**
+ * Whether a member may give themselves `role` in committee `commNumber` from
+ * the intake form or the profile page. Secretary and above (priority 1-5) can
+ * create events, verify payments and approve money, so those roles are only
+ * granted by the President from the Add Role page. Keeping a role the member
+ * already holds is always fine.
+ */
+export const canSelfAssignRole = async (role: string, userId: string, commNumber: string) => {
+  const privileged = await getRolesByPriorityRange(1, 5);
+  if (!privileged.includes(role)) return true;
+
+  const [current] = await db
+    .select({ role: executives.role })
+    .from(executives)
+    .where(and(eq(executives.id, userId), eq(executives.number, commNumber)));
+  return current?.role === role;
+};
 
 export const submitCommitteeApplication = async (data: CommitteeSubmissionInput) => {
   const name = data.name?.trim();
@@ -606,11 +631,24 @@ export const submitCommitteeApplication = async (data: CommitteeSubmissionInput)
     }
 
     const existingUser = userByMatrix || userByEmail;
+
+    // Only the account owner may submit for an existing account. Otherwise
+    // anyone could send someone else's Matrix ID and take the account over.
+    if (existingUser && existingUser.id !== data.callerId) {
+      throw new HTTPException(409, {
+        message:
+          'An account with this Matrix ID or email already exists. Please log in and submit the form from your account.',
+      });
+    }
+
     const targetUserId = existingUser ? existingUser.id : matrixId;
 
     if (!existingUser) {
-      // New user: hash password and insert
-      const plainPassword = data.password?.trim() || matrixId;
+      // New user: they must choose a password (never default it to the Matrix ID)
+      const plainPassword = data.password?.trim() ?? '';
+      if (plainPassword.length < 6) {
+        throw new HTTPException(400, { message: 'Password must be at least 6 characters' });
+      }
       const hashedPassword = await hashPassword(plainPassword);
 
       await tx.insert(users).values({
@@ -658,8 +696,12 @@ export const submitCommitteeApplication = async (data: CommitteeSubmissionInput)
 
     const roleName = mapDesignationToRole(designation);
 
+    // Officer roles wait for the President; ordinary member roles follow auto-approve
+    const roleAllowed = await canSelfAssignRole(roleName, targetUserId, commNumber);
+    const status = roleAllowed ? effectiveStatus : 'pending';
+
     // c. Upsert executives (only approved submissions create or keep the executives row)
-    if (effectiveStatus === 'approved') {
+    if (status === 'approved') {
       await tx
         .insert(executives)
         .values({
@@ -702,7 +744,7 @@ export const submitCommitteeApplication = async (data: CommitteeSubmissionInput)
         githubUrl: data.githubUrl?.trim() || null,
         linkedinUrl: data.linkedinUrl?.trim() || null,
         facebookUrl: data.facebookUrl?.trim() || null,
-        status: effectiveStatus,
+        status,
       })
       .onConflictDoUpdate({
         target: [committeeSubmissions.matrixId, committeeSubmissions.committeeNumber],
@@ -719,30 +761,22 @@ export const submitCommitteeApplication = async (data: CommitteeSubmissionInput)
           githubUrl: data.githubUrl?.trim() || null,
           linkedinUrl: data.linkedinUrl?.trim() || null,
           facebookUrl: data.facebookUrl?.trim() || null,
-          status: effectiveStatus,
+          status,
           updatedAt: new Date(),
         },
       })
       .returning();
 
-    // Generate JWT token for auto-login
-    const token = generateToken({
-      id: targetUserId,
-      role: roleName,
-      position: posKey,
-      gender: data.gender || targetComm.gender || 'male',
-      committeeNumber: commNumber,
-      mustChangePassword: false,
-    });
-
     return {
       submission: sub,
       userId: targetUserId,
-      token,
-      status: effectiveStatus,
-      message: effectiveStatus === 'approved'
-        ? 'Application registered and approved successfully!'
-        : 'Application submitted and pending approval.',
+      status,
+      message:
+        status === 'approved'
+          ? 'Application registered and approved successfully!'
+          : roleAllowed
+            ? 'Application submitted and pending approval.'
+            : 'Application submitted. Officer designations are confirmed by the President, so yours will show once it is approved.',
     };
   });
 
@@ -754,7 +788,9 @@ export const submitCommitteeApplication = async (data: CommitteeSubmissionInput)
   invalidate('users:');
   invalidate('dashboard:');
 
-  return result;
+  // Log the submitter in with the role the database actually gives them
+  const token = await issueSessionToken(result.userId);
+  return { ...result, token };
 };
 
 export const getCommitteeSubmissionByMatrixId = async (matrixId: string) => {

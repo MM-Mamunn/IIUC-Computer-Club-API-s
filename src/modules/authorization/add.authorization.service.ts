@@ -3,7 +3,7 @@ import { executives, users, committeeSubmissions } from '../../db/schema';
 import { eq, and, or } from 'drizzle-orm';
 import { HTTPException } from 'hono/http-exception';
 import type { Context } from 'hono';
-import { assertCommitteeOpen, getRolesByPriorityRange } from '../global/global.service';
+import { assertCommitteeOpen, getRolePriority, getRolesByPriorityRange } from '../global/global.service';
 import { invalidate } from '../../utils/cache';
 import { log } from 'node:console';
 
@@ -30,6 +30,8 @@ async function syncCommitteeSubmissionDesignation(id: string, number: string, de
           designation,
           name: userRecord.name,
           email: userRecord.email,
+          // The President assigning the role is the approval of a pending claim
+          status: 'approved',
           updatedAt: new Date(),
         })
         .where(eq(committeeSubmissions.id, existingSub.id));
@@ -397,7 +399,18 @@ export const deleteMember = async (id: string, number: string, c: Context) => {
   if (existing.length <= 0) {
     throw new HTTPException(409, { message: `Member not found in number ${number}` });
   }
-  console.log(existing);
+
+  // Only the President can remove someone of equal or higher rank (e.g. a VP
+  // can't remove the President or another VP). Removing yourself is allowed.
+  if (id !== user.id) {
+    const callerPriority = await getRolePriority(user.role);
+    const targetPriority = await getRolePriority(existing[0].role);
+    if (callerPriority !== 1 && targetPriority <= callerPriority) {
+      throw new HTTPException(403, {
+        message: 'You can only remove members ranked below you. Ask the President to do this.',
+      });
+    }
+  }
 
   const [del] = await db
     .delete(executives)

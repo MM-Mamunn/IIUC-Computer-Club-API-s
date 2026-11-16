@@ -11,12 +11,12 @@ import {
 } from '../../db/event.schema';
 import { createRefundCasesForEvent } from '../refund/refund.service';
 import { users, committee, executives } from '../../db/schema';
-import { eq, ne, desc, and, or, count, sum, sql, lte } from 'drizzle-orm';
+import { eq, ne, desc, and, or, count, sum, sql, lte, inArray } from 'drizzle-orm';
 import { HTTPException } from 'hono/http-exception';
 import type { Context } from 'hono';
 import { hashPassword } from '../../utils/hash';
 import { cached, invalidate } from '../../utils/cache';
-import { assertCommitteeOpen } from '../global/global.service';
+import { assertCommitteeOpen, getRolesByPriorityRange } from '../global/global.service';
 import {
   sendEventRegistrationEmail,
   sendPaymentConfirmedEmail,
@@ -25,6 +25,9 @@ import {
 } from '../../utils/email';
 import { getBangladeshDayKey, getBangladeshYear } from '../../utils/datetime';
 import { generateToken, verifyToken } from '../../utils/jwt';
+import { sessionClaims } from '../../utils/session';
+import { runAfterResponse } from '../../utils/background';
+import { resolveFrontendUrl } from '../../config/origins';
 import { slugify, isNumericSlug } from '../../utils/slug';
 
 function invalidateEventCaches() {
@@ -361,11 +364,133 @@ export const getEventById = async (idOrSlug: number | string) => {
   return { ...event, registrationCount: regCount?.count ?? 0 };
 };
 
+// ─── Staff-only budget figures ───
+// Officers (priority 1–4) see every event's budget; anyone else only the
+// events they manage. Never CDN-cached: the answer depends on who asks.
+export const getStaffEventBudgets = async (user: { id: string; role?: string }) => {
+  const budgetColumns = {
+    id: events.id,
+    estimatedBudget: events.estimatedBudget,
+    allocatedBudget: events.allocatedBudget,
+  };
+  const officerRoles = await getRolesByPriorityRange(1, 4);
+  if (officerRoles.includes(user.role ?? '')) {
+    return db.select(budgetColumns).from(events);
+  }
+  const managed = await db
+    .select({ eventId: eventManagers.eventId })
+    .from(eventManagers)
+    .where(eq(eventManagers.userId, user.id));
+  if (managed.length === 0) return [];
+  return db
+    .select(budgetColumns)
+    .from(events)
+    .where(inArray(events.id, managed.map((m) => m.eventId)));
+};
+
 // ─── Update Event ───
-export const updateEvent = async (id: number, data: Record<string, unknown>) => {
+// Fields that decide where students' money goes or how they register. Only
+// officers (priority 1–4) may change them. An event manager who isn't an
+// officer can still save the edit form, since it sends these back unchanged.
+const PROTECTED_EVENT_FIELDS = [
+  'paymentNumbers',
+  'fee',
+  'isPaid',
+  'isDonation',
+  'sslcommerzEnabled',
+  'useExternalForm',
+  'externalFormUrl',
+  'estimatedBudget',
+  'allocatedBudget',
+  'committeeNumber',
+] as const;
+
+const normalizePaymentNumbers = (value: unknown): string => {
+  const out: Record<string, string[]> = {};
+  if (value && typeof value === 'object') {
+    for (const [method, numbers] of Object.entries(value as Record<string, unknown>)) {
+      const list = (Array.isArray(numbers) ? numbers : [numbers])
+        .map((n) => String(n ?? '').trim())
+        .filter(Boolean)
+        .sort();
+      if (list.length) out[method] = list;
+    }
+  }
+  return JSON.stringify(Object.keys(out).sort().map((k) => [k, out[k]]));
+};
+
+const normalizeEventField = (field: (typeof PROTECTED_EVENT_FIELDS)[number], value: unknown) => {
+  switch (field) {
+    case 'paymentNumbers':
+      return normalizePaymentNumbers(value);
+    case 'fee':
+    case 'estimatedBudget':
+    case 'allocatedBudget':
+      return Number(value ?? 0) || 0;
+    case 'isPaid':
+    case 'isDonation':
+    case 'sslcommerzEnabled':
+    case 'useExternalForm':
+      return value === true || value === 'true';
+    default:
+      return String(value ?? '').trim();
+  }
+};
+
+// The edit form resets settings that don't apply to an event: a free event
+// always sends fee 0, an event that takes no money sends SSLCommerz off and
+// no numbers, and the form URL is cleared when the external form is off. Any
+// older value still stored there would otherwise look like a change and block
+// the manager's save. A reset value is only allowed where the field doesn't
+// apply; any other different value still counts as a change.
+const RESET_VALUES: Partial<Record<(typeof PROTECTED_EVENT_FIELDS)[number], unknown>> = {
+  fee: 0,
+  sslcommerzEnabled: false,
+  paymentNumbers: '[]',
+  externalFormUrl: '',
+};
+
+/** The protected fields this update would really change */
+const changedProtectedFields = (data: Record<string, unknown>, existing: Record<string, unknown>) => {
+  const after = (field: (typeof PROTECTED_EVENT_FIELDS)[number]) =>
+    normalizeEventField(field, data[field] !== undefined ? data[field] : existing[field]);
+  const takesMoney = after('isPaid') || after('isDonation');
+  const notApplicable: Partial<Record<(typeof PROTECTED_EVENT_FIELDS)[number], boolean>> = {
+    fee: !after('isPaid'),
+    sslcommerzEnabled: !takesMoney,
+    paymentNumbers: !takesMoney,
+    externalFormUrl: !after('useExternalForm'),
+  };
+
+  return PROTECTED_EVENT_FIELDS.filter((field) => {
+    if (data[field] === undefined) return false;
+    const sent = normalizeEventField(field, data[field]);
+    if (sent === normalizeEventField(field, existing[field])) return false;
+    return !(notApplicable[field] && sent === RESET_VALUES[field]);
+  });
+};
+
+export const updateEvent = async (
+  id: number,
+  data: Record<string, unknown>,
+  actor?: { id: string; role?: string },
+) => {
   const [existing] = await db.select().from(events).where(eq(events.id, id));
   if (!existing) throw new HTTPException(404, { message: 'Event not found' });
   await assertCommitteeOpen(existing.committeeNumber);
+
+  if (actor) {
+    const officerRoles = await getRolesByPriorityRange(1, 4);
+    if (!officerRoles.includes(actor.role ?? '')) {
+      const changed = changedProtectedFields(data, existing);
+      if (changed.length > 0) {
+        throw new HTTPException(403, {
+          message:
+            'Only club officers can change payment numbers, fees, budgets or registration settings for an event.',
+        });
+      }
+    }
+  }
 
   // Whitelist of allowed fields
   const allowed = new Set([
@@ -461,9 +586,7 @@ export const updateEvent = async (id: number, data: Record<string, unknown>) => 
     (updateData.isDonation as boolean | undefined) ?? existing.isDonation ?? false;
 
   if (nextStatus === 'cancelled' && (nextIsPaid || nextIsDonation)) {
-    createRefundCasesForEvent(id).catch((err) =>
-      console.error('[Refund] Failed to create refund cases:', err),
-    );
+    runAfterResponse('createRefundCasesForEvent', () => createRefundCasesForEvent(id));
   }
 
   return updated;
@@ -615,15 +738,17 @@ export const registerForEvent = async (
     .from(users)
     .where(eq(users.id, userId));
   if (regUser && !event.useExternalForm) {
-    await sendEventRegistrationEmail(
-      regUser.email,
-      regUser.name,
-      event.title,
-      event.eventDate.toISOString(),
-      event.venue,
-      event.isPaid,
-      event.fee ?? 0,
-      event.isDonation,
+    runAfterResponse('sendEventRegistrationEmail', () =>
+      sendEventRegistrationEmail(
+        regUser.email,
+        regUser.name,
+        event.title,
+        event.eventDate.toISOString(),
+        event.venue,
+        event.isPaid,
+        event.fee ?? 0,
+        event.isDonation,
+      ),
     );
   }
 
@@ -790,19 +915,22 @@ export const guestRegisterForEvent = async (
     gender: data.gender,
     committeeNumber: '',
     mustChangePassword: false,
+    ...sessionClaims(hashed),
   });
 
   // Send event registration confirmation email (async, don't block response)
   if (!event.useExternalForm) {
-    await sendEventRegistrationEmail(
-      email,
-      data.name.trim(),
-      event.title,
-      event.eventDate.toISOString(),
-      event.venue,
-      event.isPaid,
-      event.fee ?? 0,
-      event.isDonation,
+    runAfterResponse('sendEventRegistrationEmail', () =>
+      sendEventRegistrationEmail(
+        email,
+        data.name.trim(),
+        event.title,
+        event.eventDate.toISOString(),
+        event.venue,
+        event.isPaid,
+        event.fee ?? 0,
+        event.isDonation,
+      ),
     );
   }
 
@@ -1063,14 +1191,16 @@ export const verifyPayment = async (
     const [user] = await db.select().from(users).where(eq(users.id, userId));
     const [event] = await db.select().from(events).where(eq(events.id, eventId));
     if (user?.email && event) {
-      await sendPaymentConfirmedEmail(
-        user.email,
-        user.name,
-        event.title,
-        event.eventDate.toISOString(),
-        event.venue,
-        event.fee ?? 0,
-        event.isDonation,
+      runAfterResponse('sendPaymentConfirmedEmail', () =>
+        sendPaymentConfirmedEmail(
+          user.email,
+          user.name,
+          event.title,
+          event.eventDate.toISOString(),
+          event.venue,
+          event.fee ?? 0,
+          event.isDonation,
+        ),
       );
     }
 
@@ -1137,21 +1267,24 @@ export const verifyPayment = async (
     // Send rejection email with event details link
     const [user] = await db.select().from(users).where(eq(users.id, userId));
     if (user?.email && event) {
-      const baseUrl = frontendBaseUrl || process.env.FRONTEND_URL || 'http://localhost:3000';
+      // Only our own sites, like the reset link
+      const baseUrl = resolveFrontendUrl(frontendBaseUrl);
       const fixPaymentLink = `${baseUrl}/events/${eventId}`;
 
-      await sendPaymentRejectionEmail(
-        user.email,
-        user.name,
-        event.title,
-        event.eventDate.toISOString(),
-        event.venue,
-        rejectionReason.trim(),
-        fixPaymentLink,
-        event.fee ?? 0,
-        event.isDonation,
-        type,
-        amountDeficit,
+      runAfterResponse('sendPaymentRejectionEmail', () =>
+        sendPaymentRejectionEmail(
+          user.email,
+          user.name,
+          event.title,
+          event.eventDate.toISOString(),
+          event.venue,
+          rejectionReason.trim(),
+          fixPaymentLink,
+          event.fee ?? 0,
+          event.isDonation,
+          type,
+          amountDeficit,
+        ),
       );
     }
 
@@ -1188,14 +1321,16 @@ export const verifySslcommerzPayment = async (tranId: string, valId: string) => 
   const [user] = await db.select().from(users).where(eq(users.id, reg.userId));
   const [event] = await db.select().from(events).where(eq(events.id, reg.eventId));
   if (user?.email && event) {
-    await sendPaymentConfirmedEmail(
-      user.email,
-      user.name,
-      event.title,
-      event.eventDate.toISOString(),
-      event.venue,
-      event.fee ?? 0,
-      event.isDonation,
+    runAfterResponse('sendPaymentConfirmedEmail', () =>
+      sendPaymentConfirmedEmail(
+        user.email,
+        user.name,
+        event.title,
+        event.eventDate.toISOString(),
+        event.venue,
+        event.fee ?? 0,
+        event.isDonation,
+      ),
     );
   }
 
@@ -1418,14 +1553,16 @@ export const assignDuty = async (
   // Send notification email asynchronously
   try {
     const dashboardLink = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/dashboard`;
-    await sendDutyAssignmentEmail(
-      userExists.email,
-      userExists.name,
-      event.title,
-      duty,
-      event.eventDate.toISOString(),
-      event.venue,
-      dashboardLink,
+    runAfterResponse('sendDutyAssignmentEmail', () =>
+      sendDutyAssignmentEmail(
+        userExists.email,
+        userExists.name,
+        event.title,
+        duty,
+        event.eventDate.toISOString(),
+        event.venue,
+        dashboardLink,
+      ),
     );
   } catch (emailErr) {
     console.error('Failed to send duty assignment email notification:', emailErr);
@@ -1584,14 +1721,16 @@ export const addEventManager = async (eventId: number, userId: string, assignedB
   // Send notification email asynchronously
   try {
     const dashboardLink = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/dashboard`;
-    await sendDutyAssignmentEmail(
-      userExists.email,
-      userExists.name,
-      event.title,
-      'Event Manager',
-      event.eventDate.toISOString(),
-      event.venue,
-      dashboardLink,
+    runAfterResponse('sendDutyAssignmentEmail', () =>
+      sendDutyAssignmentEmail(
+        userExists.email,
+        userExists.name,
+        event.title,
+        'Event Manager',
+        event.eventDate.toISOString(),
+        event.venue,
+        dashboardLink,
+      ),
     );
   } catch (emailErr) {
     console.error('Failed to send event manager email notification:', emailErr);
@@ -1695,9 +1834,13 @@ export const addEventExpense = async (
 export const updateEventExpense = async (
   expenseId: number,
   data: { description?: string; amount?: number; category?: string; receiptImage?: string },
+  eventId?: number,
 ) => {
   const [existing] = await db.select().from(eventExpenses).where(eq(eventExpenses.id, expenseId));
-  if (!existing) throw new HTTPException(404, { message: 'Expense not found' });
+  // The route authorizes the caller for :id, so the expense must belong to that event
+  if (!existing || (eventId !== undefined && existing.eventId !== eventId)) {
+    throw new HTTPException(404, { message: 'Expense not found' });
+  }
 
   // Check committee closed
   const [evtForClose] = await db
@@ -1735,9 +1878,12 @@ export const updateEventExpense = async (
   return updated;
 };
 
-export const deleteEventExpense = async (expenseId: number) => {
+export const deleteEventExpense = async (expenseId: number, eventId?: number) => {
   const [existing] = await db.select().from(eventExpenses).where(eq(eventExpenses.id, expenseId));
-  if (!existing) throw new HTTPException(404, { message: 'Expense not found' });
+  // The route authorizes the caller for :id, so the expense must belong to that event
+  if (!existing || (eventId !== undefined && existing.eventId !== eventId)) {
+    throw new HTTPException(404, { message: 'Expense not found' });
+  }
 
   // Check committee closed
   const [evtForClose] = await db
@@ -1827,9 +1973,13 @@ export const reviewExpenseClaim = async (
   reviewerId: string,
   approved: boolean,
   notes?: string,
+  eventId?: number,
 ) => {
   const [claim] = await db.select().from(expenseClaims).where(eq(expenseClaims.id, claimId));
-  if (!claim) throw new HTTPException(404, { message: 'Claim not found' });
+  // The route authorizes the caller for :id, so the claim must belong to that event
+  if (!claim || (eventId !== undefined && claim.eventId !== eventId)) {
+    throw new HTTPException(404, { message: 'Claim not found' });
+  }
   if (claim.status !== 'pending' && claim.status !== 'rejected' && claim.status !== 'approved') {
     throw new HTTPException(400, { message: `Claim is already ${claim.status} and cannot be reviewed` });
   }
@@ -1878,9 +2028,13 @@ export const markClaimPaid = async (
   claimId: number,
   paidByUserId: string,
   paymentProof?: string,
+  eventId?: number,
 ) => {
   const [claim] = await db.select().from(expenseClaims).where(eq(expenseClaims.id, claimId));
-  if (!claim) throw new HTTPException(404, { message: 'Claim not found' });
+  // The route authorizes the caller for :id, so the claim must belong to that event
+  if (!claim || (eventId !== undefined && claim.eventId !== eventId)) {
+    throw new HTTPException(404, { message: 'Claim not found' });
+  }
   if (claim.status !== 'approved') {
     throw new HTTPException(400, { message: 'Only approved claims can be marked as paid' });
   }
@@ -1938,9 +2092,13 @@ export const updateExpenseClaim = async (
   claimId: number,
   userId: string,
   data: { description?: string; amount?: number; proofImage?: string },
+  eventId?: number,
 ) => {
   const [claim] = await db.select().from(expenseClaims).where(eq(expenseClaims.id, claimId));
-  if (!claim) throw new HTTPException(404, { message: 'Claim not found' });
+  // The route authorizes the caller for :id, so the claim must belong to that event
+  if (!claim || (eventId !== undefined && claim.eventId !== eventId)) {
+    throw new HTTPException(404, { message: 'Claim not found' });
+  }
 
   if (claim.userId !== userId) {
     throw new HTTPException(403, { message: 'Only the creator of the claim can edit it' });
@@ -1986,9 +2144,12 @@ export const updateExpenseClaim = async (
   return updated;
 };
 
-export const deleteExpenseClaim = async (claimId: number, actorId: string) => {
+export const deleteExpenseClaim = async (claimId: number, actorId: string, eventId?: number) => {
   const [claim] = await db.select().from(expenseClaims).where(eq(expenseClaims.id, claimId));
-  if (!claim) throw new HTTPException(404, { message: 'Claim not found' });
+  // The route authorizes the caller for :id, so the claim must belong to that event
+  if (!claim || (eventId !== undefined && claim.eventId !== eventId)) {
+    throw new HTTPException(404, { message: 'Claim not found' });
+  }
 
   const [event] = await db.select().from(events).where(eq(events.id, claim.eventId));
   if (!event) throw new HTTPException(404, { message: 'Event not found' });

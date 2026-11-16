@@ -1,6 +1,9 @@
 {
   "buildCommand": "npm run vercel-build",
   "outputDirectory": ".",
+  "regions": [
+    "iad1"
+  ],
   "rewrites": [
     {
       "source": "/api/(.*)",
@@ -8,6 +11,10 @@
     }
   ],
   "redirects": [
-    { "source": "/", "destination": "/api", "permanent": false }
+    {
+      "source": "/",
+      "destination": "/api",
+      "permanent": false
+    }
   ]
 }

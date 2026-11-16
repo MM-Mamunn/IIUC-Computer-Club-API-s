@@ -11,29 +11,14 @@ import newsletterRoutes from './modules/newsletter/newsletter.routes';
 import certificateRoutes from './modules/certificate/certificate.routes';
 import general from './modules/general/general.routes';
 import { invalidate } from './utils/cache';
+import { isAllowedOrigin } from './config/origins';
 
 const app = new Hono();
-
-const ALLOWED_ORIGINS = [
-  'https://computerclub.iiuc.ac.bd',
-  'https://www.computerclub.iiuc.ac.bd',
-  'https://iiuccomputerclub.vercel.app',
-  'https://www.iiuccomputerclub.vercel.app',
-  'https://iiuccomputerclub.netlify.app',
-  'https://www.iiuccomputerclub.netlify.app',
-  'https://iiuc-computer-club-one.vercel.app',
-  'https://www.iiuc-computer-club-one.vercel.app',
-  'http://localhost:3000',
-];
-
-// Netlify deploy previews and branch deploys, e.g. deploy-preview-4--iiuccomputerclub.netlify.app
-const NETLIFY_PREVIEW_ORIGIN = /^https:\/\/[a-z0-9-]+--iiuccomputerclub\.netlify\.app$/;
 
 app.use(
   '/*',
   cors({
-    origin: (origin) =>
-      ALLOWED_ORIGINS.includes(origin) || NETLIFY_PREVIEW_ORIGIN.test(origin) ? origin : '',
+    origin: (origin) => (isAllowedOrigin(origin) ? origin : ''),
     allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowHeaders: ['Content-Type', 'Authorization'],
     credentials: true,

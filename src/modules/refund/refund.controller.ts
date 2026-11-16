@@ -9,6 +9,7 @@ import {
   confirmRefund,
 } from './refund.service';
 import { uploadImageToCloudinary } from '../../utils/uploadImage';
+import { getRolesByPriorityRange } from '../global/global.service';
 
 // ─── List all refunds (admin/treasurer) ───
 export const listRefundsController = async (c: Context) => {
@@ -31,8 +32,10 @@ export const getRefundController = async (c: Context) => {
   const id = Number(c.req.param('id'));
   const refund = await getRefund(id);
 
-  // Students can only see their own; staff can see any
-  if (refund.userId !== user.id && !user.role) {
+  // Students can only see their own; refund staff (priority 1-4) can see any.
+  // Every token has a role ('student' at minimum), so check the actual role.
+  const staffRoles = await getRolesByPriorityRange(1, 4);
+  if (refund.userId !== user.id && !staffRoles.includes(user.role)) {
     return c.json({ message: 'Forbidden' }, 403);
   }
 

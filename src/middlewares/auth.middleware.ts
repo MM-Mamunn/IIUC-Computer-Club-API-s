@@ -1,6 +1,13 @@
 import type { Context, Next } from "hono";
 import { verifyToken } from "../utils/jwt";
 
+/** A login token has a user id and no special `purpose` (reset, fix-payment, ...) */
+const isSessionToken = (decoded: unknown): boolean =>
+  typeof decoded === "object" &&
+  decoded !== null &&
+  typeof (decoded as { id?: unknown }).id === "string" &&
+  (decoded as { purpose?: unknown }).purpose === undefined;
+
 export const authMiddleware = async (c: Context, next: Next) => {
 
   const authHeader = c.req.header("Authorization");
@@ -27,13 +34,20 @@ export const authMiddleware = async (c: Context, next: Next) => {
     return c.json({ message: "Authentication failed. Please sign in again" }, 401);
   }
 
+  let decoded;
   try {
-    const decoded = verifyToken(token);
-    c.set("user", decoded);
-    await next();
+    decoded = verifyToken(token);
   } catch (err) {
     return c.json({ message: "Your session has expired. Please sign in again" }, 401);
   }
+
+  // Reset and fix-payment links are signed with the same secret; they must not work as logins
+  if (!isSessionToken(decoded)) {
+    return c.json({ message: "Authentication failed. Please sign in again" }, 401);
+  }
+
+  c.set("user", decoded);
+  await next();
 };
 
 export const optionalAuthMiddleware = async (c: Context, next: Next) => {
@@ -46,7 +60,7 @@ export const optionalAuthMiddleware = async (c: Context, next: Next) => {
   if (parts.length === 2 && parts[0].toLowerCase() === "bearer") {
     try {
       const decoded = verifyToken(parts[1]);
-      c.set("user", decoded);
+      if (isSessionToken(decoded)) c.set("user", decoded);
     } catch {
       // Ignore invalid token for optional auth
     }

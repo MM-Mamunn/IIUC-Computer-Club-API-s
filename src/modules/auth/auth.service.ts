@@ -3,12 +3,20 @@ import { executives, users, committeeSubmissions, committee, positions } from '.
 import { and, eq, inArray, desc, or, isNull } from 'drizzle-orm';
 import { hashPassword, comparePassword } from '../../utils/hash';
 import { generateToken } from '../../utils/jwt';
+import {
+  issueSessionToken,
+  MAX_SESSION_AGE_SECONDS,
+  passwordVersion,
+} from '../../utils/session';
+import { getRolesByPriorityRange } from '../global/global.service';
 import { HTTPException } from 'hono/http-exception';
 import type { Context } from 'hono';
-import { showActive, mapDesignationToRole } from '../committee/committee.service';
+import { showActive, mapDesignationToRole, canSelfAssignRole } from '../committee/committee.service';
 import { invalidate } from '../../utils/cache';
 import { sendPasswordResetEmail } from '../../utils/email';
 import jwt from 'jsonwebtoken';
+import { resolveFrontendUrl } from '../../config/origins';
+import { runAfterResponse } from '../../utils/background';
 import { resolveImageInput, PROFILE_PHOTO_UPLOAD } from '../../utils/uploadImage';
 
 export const registerUser = async (
@@ -104,6 +112,10 @@ export const registerUser = async (
         : JSON.stringify(skills)
       : null;
 
+    // A claimed officer designation stays pending until the President assigns the role
+    const officerRoles = await getRolesByPriorityRange(1, 5);
+    const claimsOfficerRole = officerRoles.includes(mapDesignationToRole(designation || ''));
+
     const [existingSub] = await db
       .select()
       .from(committeeSubmissions)
@@ -127,6 +139,7 @@ export const registerUser = async (
           linkedinUrl: linkedinUrl || existingSub.linkedinUrl,
           facebookUrl: facebookUrl || existingSub.facebookUrl,
           portfolioUrl: twitterUrl || existingSub.portfolioUrl,
+          ...(claimsOfficerRole ? { status: 'pending' } : {}),
           updatedAt: new Date(),
         })
         .where(eq(committeeSubmissions.id, existingSub.id));
@@ -146,7 +159,7 @@ export const registerUser = async (
         githubUrl: githubUrl || null,
         linkedinUrl: linkedinUrl || null,
         facebookUrl: facebookUrl || null,
-        status: 'approved',
+        status: claimsOfficerRole ? 'pending' : 'approved',
       });
     }
   } catch (err) {
@@ -173,49 +186,8 @@ export const loginUser = async (id: string, password: string) => {
     throw new HTTPException(401, { message: 'Invalid credentials' });
   }
 
-  const active = await showActive();
-  const activeNumbers = active.map((a) => a.number);
-
-  const [pos] = await db
-    .select()
-    .from(executives)
-    .where(and(eq(executives.id, id), inArray(executives.number, activeNumbers)));
-    
-  let role = pos?.role ?? 'student';
-  let position = pos?.position ?? '';
-  let committeeNumber = pos?.number ?? '';
-
-  if (!pos) {
-    const [latestExecutive] = await db
-      .select({
-         role: executives.role,
-         position: executives.position,
-         number: executives.number
-      })
-      .from(executives)
-      // We need to import committee to join it
-      .where(and(eq(executives.id, id), eq(executives.role, 'president')))
-      .orderBy(desc(executives.number))
-      .limit(1);
-
-    if (latestExecutive) {
-      role = 'president';
-      position = latestExecutive.position ?? '';
-      committeeNumber = latestExecutive.number;
-    } else if (id === 'MMU') {
-      role = 'president';
-      position = 'president';
-    }
-  }
-
-  const token = generateToken({
-    id: user.id,
-    role,
-    position,
-    gender: user.gender,
-    committeeNumber,
-    mustChangePassword: user.mustChangePassword ?? false,
-  });
+  // Role always comes from the executives table
+  const token = await issueSessionToken(user.id);
 
   return { token };
 };
@@ -232,50 +204,21 @@ export const refreshToken = async (c: Context) => {
     throw new HTTPException(401, { message: 'User not found' });
   }
 
-  const active = await showActive();
-  const activeNumbers = active.map((a) => a.number);
-
-  const [pos] = activeNumbers.length
-    ? await db
-        .select()
-        .from(executives)
-        .where(and(eq(executives.id, user.id), inArray(executives.number, activeNumbers)))
-    : [];
-
-  let role = pos?.role ?? 'student';
-  let position = pos?.position ?? '';
-  let committeeNumber = pos?.number ?? '';
-
-  if (!pos) {
-    const [latestExecutive] = await db
-      .select({
-         role: executives.role,
-         position: executives.position,
-         number: executives.number
-      })
-      .from(executives)
-      .where(and(eq(executives.id, user.id), eq(executives.role, 'president')))
-      .orderBy(desc(executives.number))
-      .limit(1);
-
-    if (latestExecutive) {
-      role = 'president';
-      position = latestExecutive.position ?? '';
-      committeeNumber = latestExecutive.number;
-    } else if (user.id === 'MMU') {
-      role = 'president';
-      position = 'president';
-    }
+  // A password change ends every other session at its next refresh
+  if (currentUser.pwv && currentUser.pwv !== passwordVersion(user.password)) {
+    throw new HTTPException(401, { message: 'Your password was changed. Please sign in again.' });
   }
 
-  const token = generateToken({
-    id: user.id,
-    role,
-    position,
-    gender: user.gender,
-    committeeNumber,
-    mustChangePassword: user.mustChangePassword ?? false,
-  });
+  // Refreshing can't keep a session alive forever. Tokens from before this
+  // check have no authTime; their clock starts now.
+  const now = Math.floor(Date.now() / 1000);
+  const authTime = typeof currentUser.authTime === 'number' ? currentUser.authTime : now;
+  if (now - authTime > MAX_SESSION_AGE_SECONDS) {
+    throw new HTTPException(401, { message: 'Your session has expired. Please sign in again.' });
+  }
+
+  // Role always comes from the executives table
+  const token = await issueSessionToken(user.id, authTime);
 
   return { token };
 };
@@ -468,11 +411,48 @@ type UpdateUserInput = {
   session?: string | null;
 };
 
+/** users columns a member may edit on their own profile; anything else in the body is ignored */
+const EDITABLE_USER_FIELDS = [
+  'name',
+  'email',
+  'gender',
+  'department',
+  'profileImage',
+  'description',
+  'githubUrl',
+  'linkedinUrl',
+  'facebookUrl',
+  'twitterUrl',
+] as const;
+
 export const updateUser = async (data: UpdateUserInput, c: Context) => {
-  const { batch, skills, designation, committeeNumber, session, portfolioUrl, ...userFields } = data;
+  const { batch, skills, designation, committeeNumber, session, portfolioUrl } = data;
   const user = c.get('user');
   if (!user.id) {
     throw new HTTPException(400, { message: 'User id is required' });
+  }
+
+  // Copy only whitelisted columns, so a request can't set id, password,
+  // mustChangePassword or anything else on the users row
+  const userFields: Partial<Record<(typeof EDITABLE_USER_FIELDS)[number], any>> = {};
+  for (const key of EDITABLE_USER_FIELDS) {
+    if (data[key] !== undefined) userFields[key] = data[key];
+  }
+
+  if (typeof userFields.email === 'string') {
+    const email = userFields.email.trim().toLowerCase();
+    if (!email.endsWith('@ugrad.iiuc.ac.bd')) {
+      throw new HTTPException(400, { message: 'Email must end with @ugrad.iiuc.ac.bd' });
+    }
+    const [taken] = await db.select({ id: users.id }).from(users).where(eq(users.email, email));
+    if (taken && taken.id !== user.id) {
+      throw new HTTPException(409, { message: 'This email is already used by another account' });
+    }
+    userFields.email = email;
+  }
+
+  if (userFields.gender !== undefined && userFields.gender !== 'male' && userFields.gender !== 'female') {
+    throw new HTTPException(400, { message: "Gender must be 'male' or 'female'" });
   }
 
   // Base64 photos bloat every members response; store only the Cloudinary URL
@@ -489,9 +469,22 @@ export const updateUser = async (data: UpdateUserInput, c: Context) => {
     updateData.batch = batch;
   }
 
-  if (updateData.password) {
-    throw new HTTPException(400, { message: "Can't change password through this endpoint" });
-  }
+  // Never return the password hash or other private columns
+  const profileColumns = {
+    id: users.id,
+    name: users.name,
+    gender: users.gender,
+    email: users.email,
+    department: users.department,
+    description: users.description,
+    profileImage: users.profileImage,
+    githubUrl: users.githubUrl,
+    linkedinUrl: users.linkedinUrl,
+    facebookUrl: users.facebookUrl,
+    twitterUrl: users.twitterUrl,
+    batch: users.batch,
+    createdAt: users.createdAt,
+  };
 
   let updatedUser;
   if (Object.keys(updateData).length > 0) {
@@ -499,24 +492,10 @@ export const updateUser = async (data: UpdateUserInput, c: Context) => {
       .update(users)
       .set(updateData)
       .where(eq(users.id, user.id))
-      .returning({
-        id: users.id,
-        name: users.name,
-        gender: users.gender,
-        email: users.email,
-        department: users.department,
-        description: users.description,
-        profileImage: users.profileImage,
-        githubUrl: users.githubUrl,
-        linkedinUrl: users.linkedinUrl,
-        facebookUrl: users.facebookUrl,
-        twitterUrl: users.twitterUrl,
-        batch: users.batch,
-        createdAt: users.createdAt,
-      });
+      .returning(profileColumns);
     updatedUser = res;
   } else {
-    const [res] = await db.select().from(users).where(eq(users.id, user.id));
+    const [res] = await db.select(profileColumns).from(users).where(eq(users.id, user.id));
     updatedUser = res;
   }
 
@@ -576,10 +555,29 @@ export const updateUser = async (data: UpdateUserInput, c: Context) => {
 
   const existingSub = existingSubForTarget || latestSub;
 
-  const finalDesignation =
-    designation !== undefined
-      ? designation || existingSubForTarget?.designation || latestSub?.designation
-      : existingSubForTarget?.designation || latestSub?.designation;
+  const currentDesignation = existingSubForTarget?.designation || latestSub?.designation;
+  let finalDesignation =
+    designation !== undefined ? designation || currentDesignation : currentDesignation;
+
+  // Officer roles (secretary and above) are granted by the President from Add Role.
+  // A member can keep a role they already hold, but can't give themselves a new one.
+  let designationPending = false;
+  let syncExecutive = false;
+  if (finalDesignation && targetCommNumber) {
+    syncExecutive = await canSelfAssignRole(
+      mapDesignationToRole(finalDesignation),
+      user.id,
+      targetCommNumber,
+    );
+    if (!syncExecutive) {
+      const changed =
+        finalDesignation.trim().toLowerCase() !== (currentDesignation ?? '').trim().toLowerCase();
+      if (changed) {
+        designationPending = true;
+        finalDesignation = currentDesignation;
+      }
+    }
+  }
 
   if (existingSubForTarget) {
     await db
@@ -640,7 +638,7 @@ export const updateUser = async (data: UpdateUserInput, c: Context) => {
     .where(eq(committeeSubmissions.matrixId, user.id));
 
   // 5. Sync with executives table specifically for targetCommNumber
-  if (finalDesignation && targetCommNumber) {
+  if (syncExecutive && finalDesignation && targetCommNumber) {
     const posKey = finalDesignation.toLowerCase().trim();
     await db
       .insert(positions)
@@ -698,7 +696,7 @@ export const updateUser = async (data: UpdateUserInput, c: Context) => {
     : [];
 
   const tokenRole = currentPos?.role ?? 'student';
-  const tokenPosition = finalDesignation || currentPos?.position || '';
+  const tokenPosition = (syncExecutive && finalDesignation) || currentPos?.position || '';
   const tokenCommNumber = currentPos?.number ?? targetCommNumber ?? '';
 
   const token = generateToken({
@@ -707,7 +705,10 @@ export const updateUser = async (data: UpdateUserInput, c: Context) => {
     position: tokenPosition,
     gender: updatedUser.gender,
     committeeNumber: tokenCommNumber,
-    mustChangePassword: false,
+    mustChangePassword: Boolean(user.mustChangePassword),
+    // Same session: keep its password fingerprint and login time
+    ...(user.pwv ? { pwv: user.pwv } : {}),
+    ...(typeof user.authTime === 'number' ? { authTime: user.authTime } : {}),
   });
 
   const userTenures = await db
@@ -750,6 +751,7 @@ export const updateUser = async (data: UpdateUserInput, c: Context) => {
     session: session !== undefined ? session : existingSub?.session || null,
     portfolioUrl: portfolioUrl || updatedUser.twitterUrl || null,
     tenures: formattedTenures,
+    designationPending,
     token,
   };
 };
@@ -809,14 +811,20 @@ export const forgotPassword = async (email: string, frontendUrl: string) => {
     return { message: 'If an account with that email exists, a reset link has been sent.' };
   }
 
-  // Generate a short-lived reset token (15 min)
-  const resetToken = jwt.sign({ id: user.id, purpose: 'password-reset' }, process.env.JWT_SECRET!, {
-    expiresIn: '15m',
-  });
+  // Short-lived (15 min) and tied to the current password, so it stops
+  // working as soon as the password changes (single use)
+  const resetToken = jwt.sign(
+    { id: user.id, purpose: 'password-reset', pwv: passwordVersion(user.password) },
+    process.env.JWT_SECRET!,
+    { expiresIn: '15m' },
+  );
 
-  const resetLink = `${frontendUrl}/reset-password?token=${resetToken}`;
+  // Only our own sites; a request can't point the email at another host
+  const resetLink = `${resolveFrontendUrl(frontendUrl)}/reset-password?token=${resetToken}`;
 
-  await sendPasswordResetEmail(user.email, user.name, resetLink);
+  runAfterResponse('sendPasswordResetEmail', () =>
+      sendPasswordResetEmail(user.email, user.name, resetLink),
+    );
 
   return { message: 'If an account with that email exists, a reset link has been sent.' };
 };
@@ -831,9 +839,9 @@ export const resetPassword = async (token: string, newPassword: string) => {
     throw new HTTPException(400, { message: 'Password must be at least 6 characters' });
   }
 
-  let payload: { id: string; purpose: string };
+  let payload: { id: string; purpose: string; pwv?: string };
   try {
-    payload = jwt.verify(token, process.env.JWT_SECRET!) as { id: string; purpose: string };
+    payload = jwt.verify(token, process.env.JWT_SECRET!) as typeof payload;
   } catch {
     throw new HTTPException(400, { message: 'Invalid or expired reset link' });
   }
@@ -845,6 +853,11 @@ export const resetPassword = async (token: string, newPassword: string) => {
   const [user] = await db.select().from(users).where(eq(users.id, payload.id));
   if (!user) {
     throw new HTTPException(404, { message: 'User not found' });
+  }
+
+  // Already used (the password changed since this link was sent)
+  if (payload.pwv !== passwordVersion(user.password)) {
+    throw new HTTPException(400, { message: 'This reset link has already been used or has expired' });
   }
 
   const hashed = await hashPassword(newPassword);

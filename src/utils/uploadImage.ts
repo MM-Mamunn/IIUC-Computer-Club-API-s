@@ -6,6 +6,11 @@ import cloudinary, { isCloudinaryConfigured } from '../config/cloudinary';
 const MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024;
 const MAX_IMAGE_SIZE_MB = MAX_IMAGE_SIZE_BYTES / (1024 * 1024);
 
+// Raster formats only. SVG can carry script, and the browser-sent MIME type
+// can't be trusted, so Cloudinary also checks the real format on upload.
+const ALLOWED_FORMATS = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'avif', 'heic', 'heif'];
+const UNSUPPORTED_FORMAT_MESSAGE = 'Unsupported image format. Please upload a JPG, PNG, WebP, GIF, AVIF or HEIC image.';
+
 /**
  * Profile photos are only ever shown as small avatars, so shrink them before
  * storing (keeps aspect ratio, never upscales). Not for banners/receipts.
@@ -32,6 +37,10 @@ export const uploadImageToCloudinary = async (
     throw new HTTPException(400, { message: 'Uploaded file must be an image.' });
   }
 
+  if (file.type === 'image/svg+xml' || /\.svgz?$/i.test(file.name || '')) {
+    throw new HTTPException(400, { message: UNSUPPORTED_FORMAT_MESSAGE });
+  }
+
   if (file.size > MAX_IMAGE_SIZE_BYTES) {
     throw new HTTPException(413, {
       message: `Image is too large. Maximum allowed size is ${MAX_IMAGE_SIZE_MB}MB.`,
@@ -52,10 +61,15 @@ export const uploadImageToCloudinary = async (
         {
           folder: 'ccapi',
           ...options,
+          allowed_formats: ALLOWED_FORMATS,
         },
         (error, result) => {
           if (error) {
             const message = error.message || 'Unknown Cloudinary upload error';
+            if (/not allowed|invalid image file/i.test(message)) {
+              reject(new HTTPException(400, { message: UNSUPPORTED_FORMAT_MESSAGE }));
+              return;
+            }
             if (message.toLowerCase().includes('file size too large')) {
               reject(
                 new HTTPException(413, {

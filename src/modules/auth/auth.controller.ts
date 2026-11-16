@@ -59,8 +59,6 @@ export const register = async (c: Context) => {
   return c.json({ token: user.token.token }, 201);
 };
 export const login = async (c: Context) => {
-  console.log('in controller log in');
-
   const { id, password } = await c.req.json();
   const result = await loginUser(id, password);
   return c.json(result);
@@ -131,10 +129,14 @@ export const updateUserController = async (c: Context) => {
 
   const user = await updateUser(body, c);
 
+  const designationPending = Boolean((user as any).designationPending);
   return c.json(
     {
       success: true,
-      message: 'Profile updated',
+      message: designationPending
+        ? 'Profile updated. Officer designations are assigned by the President, so your designation was not changed.'
+        : 'Profile updated',
+      designationPending,
       user,
       token: (user as any).token,
     },

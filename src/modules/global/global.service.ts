@@ -74,6 +74,16 @@ export const genderMatch = async (id: string, number: string) => {
   return true;
 };
 
+const rolePriorities = () =>
+  cached('roles:priorities', 10 * 60_000, async () => {
+    const rows = await db.select({ role: roles.role, priority: roles.priority }).from(roles);
+    return new Map(rows.map((r) => [r.role, r.priority]));
+  });
+
+/** A role's rank: 1 is the President; roles without one (students) rank lowest */
+export const getRolePriority = async (role: string | null | undefined): Promise<number> =>
+  (role ? (await rolePriorities()).get(role) : undefined) ?? Number.POSITIVE_INFINITY;
+
 /**
  * Prevent assigning a user to a role if they already hold an equal or higher-priority
  * role in the same committee. Lower priority number = higher privilege.
